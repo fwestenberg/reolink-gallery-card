@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.0.0';
+const ReolinkGalleryCardVersion = '1.0.1';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -48,6 +48,7 @@ class GalleryCard extends LitElement {
   render() {
     const currentRes = this._currentResource();
     const hasVideos = currentRes.videos && currentRes.videos.length > 0;
+    const hasMultipleVideos = currentRes.videos && currentRes.videos.length > 1;
 
     return html`
       <ha-card>
@@ -159,13 +160,13 @@ class GalleryCard extends LitElement {
                           <!-- Video modus: terug naar Snapshot -->
                           <button class="btn-play-video" @click="${() => (this.selectedVideoUrl = null)}"><ha-icon icon="mdi:image"></ha-icon> Snapshot</button>
 
-                          <!-- Videoknoppen in videomodus -->
-                          ${hasVideos
+                          <!-- Videoknoppen in videomodus: Alleen tonen als er MEER dan 1 video is -->
+                          ${hasMultipleVideos
                             ? currentRes.videos.map(
                                 (vid, i) => html`
                                   <button class="btn-play-video ${vid.url === this.selectedVideoUrl ? 'active' : ''}" @click="${() => (this.selectedVideoUrl = vid.url)}">
                                     <ha-icon icon="mdi:play"></ha-icon>
-                                    ${currentRes.videos.length > 1 ? `Video ${i + 1}` : 'Video'}
+                                    Video ${i + 1}
                                   </button>
                                 `,
                               )
@@ -197,7 +198,6 @@ class GalleryCard extends LitElement {
   _startTimelapse() {
     this._stopTimelapse();
 
-    // Als we al op de allerlaatste foto staan bij het starten, spring direct terug naar foto 1
     if (this.resources && this.currentResourceIndex >= this.resources.length - 1) {
       this._selectResource(0);
     }
@@ -206,7 +206,6 @@ class GalleryCard extends LitElement {
     const duration = (parseFloat(this.config.timelapse_duration) || 3) * 1000;
 
     this.timelapseTimer = setInterval(() => {
-      // Stop de timelapse zodra de laatste foto is bereikt
       if (this.currentResourceIndex >= this.resources.length - 1) {
         this._stopTimelapse();
       } else {
@@ -272,7 +271,7 @@ class GalleryCard extends LitElement {
 
   _selectResource(index) {
     this.menuOpen = false;
-    this.selectedVideoUrl = null; // Zorgt dat eventuele video afgebroken wordt bij navigeren naar nieuw item
+    this.selectedVideoUrl = null;
 
     if (!this.resources || this.resources.length === 0) return;
 
