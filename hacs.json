@@ -1,0 +1,7 @@
+{
+  "name": "Reolink Gallery Card",
+  "content_in_root": false,
+  "filename": "reolink-gallery-card.js",
+  "render_readme": true,
+  "homeassistant": "2024.4.2"
+}
