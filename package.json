@@ -1,6 +1,6 @@
 {
   "name": "reolink-gallery-card",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Reolink Gallery Card for lovelace",
   "main": "dist/gallery-card.js",
   "scripts": {
