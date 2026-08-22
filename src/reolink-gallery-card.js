@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.0.1';
+const ReolinkGalleryCardVersion = '1.0.2';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -25,6 +25,7 @@ class GalleryCard extends LitElement {
       resources: {},
       currentResourceIndex: {},
       selectedVideoUrl: {},
+      selectedSnapshotUrl: {},
       modalOpen: {},
       menuOpen: {},
       isPlayingTimelapse: {},
@@ -35,27 +36,52 @@ class GalleryCard extends LitElement {
     super();
     this.modalOpen = false;
     this.selectedVideoUrl = null;
+    this.selectedSnapshotUrl = null;
     this.menuOpen = false;
     this.isPlayingTimelapse = false;
     this.timelapseTimer = null;
+    this._handleKeyDown = this._handleKeyDown.bind(this);
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener('keydown', this._handleKeyDown);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    window.removeEventListener('keydown', this._handleKeyDown);
     this._stopTimelapse();
+  }
+
+  _handleKeyDown(event) {
+    if (!this.modalOpen) return;
+
+    if (event.key === 'ArrowLeft') {
+      this._selectResource(this.currentResourceIndex - 1);
+    } else if (event.key === 'ArrowRight') {
+      this._selectResource(this.currentResourceIndex + 1);
+    } else if (event.key === 'Escape') {
+      this._closeModal();
+    }
   }
 
   render() {
     const currentRes = this._currentResource();
+
+    const activeSnapshotUrl = this.selectedSnapshotUrl || (currentRes.snapshots.length > 0 ? currentRes.snapshots[0].url : currentRes.url);
+
+    const hasSnapshots = currentRes.snapshots && currentRes.snapshots.length > 0;
+    const hasMultipleSnapshots = currentRes.snapshots && currentRes.snapshots.length > 1;
     const hasVideos = currentRes.videos && currentRes.videos.length > 0;
     const hasMultipleVideos = currentRes.videos && currentRes.videos.length > 1;
 
     return html`
       <ha-card>
-        <!-- Hoofdvenster: Exact 1 Foto met Swipe functionaliteit -->
+        <!-- Hoofdvenster: Dashboard weergave met Swipe functionaliteit -->
         <div class="resource-viewer" @touchstart="${(event) => this._handleTouchStart(event)}" @touchend="${(event) => this._handleTouchEnd(event)}">
           <div class="media-container" @click="${() => this._openModal()}">
-            <img src="${currentRes.url}" />
+            <img src="${activeSnapshotUrl}" />
           </div>
 
           <figcaption class="caption-bar">
@@ -105,17 +131,22 @@ class GalleryCard extends LitElement {
                     ${this.menuOpen
                       ? html`
                           <div class="hamburger-menu" @click="${(e) => e.stopPropagation()}">
-                            <a class="menu-item" href="${currentRes.url}" download target="_blank">
-                              <ha-icon icon="mdi:file-image-outline"></ha-icon>
-                              <span>Download snapshot</span>
-                            </a>
+                            <!-- Download Snapshots -->
+                            ${currentRes.snapshots.map(
+                              (img, i) => html`
+                                <a class="menu-item" href="${img.url}" download target="_blank">
+                                  <ha-icon icon="mdi:file-image-outline"></ha-icon>
+                                  <span>Download snapshot ${hasMultipleSnapshots ? i + 1 : ''}</span>
+                                </a>
+                              `,
+                            )}
 
-                            ${currentRes.videos &&
-                            currentRes.videos.map(
+                            <!-- Download Video's -->
+                            ${currentRes.videos.map(
                               (vid, i) => html`
                                 <a class="menu-item" href="${vid.url}" download target="_blank">
                                   <ha-icon icon="mdi:file-video-outline"></ha-icon>
-                                  <span>Download video ${currentRes.videos.length > 1 ? i + 1 : ''}</span>
+                                  <span>Download video ${hasMultipleVideos ? i + 1 : ''}</span>
                                 </a>
                               `,
                             )}
@@ -130,9 +161,11 @@ class GalleryCard extends LitElement {
 
                   <!-- Media Inhoud: Video of Grote Snapshot -->
                   <div class="modal-media-wrapper" @touchstart="${(event) => this._handleTouchStart(event)}" @touchend="${(event) => this._handleTouchEnd(event)}">
-                    ${this.selectedVideoUrl ? html` <video controls autoplay src="${this.selectedVideoUrl}"></video> ` : html` <img src="${currentRes.url}" class="modal-img" /> `}
+                    ${this.selectedVideoUrl
+                      ? html` <video controls autoplay src="${this.selectedVideoUrl}"></video> `
+                      : html` <img src="${activeSnapshotUrl}" class="modal-img" /> `}
 
-                    <!-- Bladerpijlen in modal (Altijd aanwezig, zowel bij snapshot als video) -->
+                    <!-- Bladerpijlen in modal -->
                     <button
                       class="btn btn-left"
                       @click="${(e) => {
@@ -153,31 +186,51 @@ class GalleryCard extends LitElement {
                     </button>
                   </div>
 
-                  <!-- Besturingsbalk ONDER de media (voor zowel Snapshot als Video) -->
+                  <!-- Besturingsbalk ONDER de media -->
                   <div class="video-selector-bar">
-                    ${this.selectedVideoUrl
-                      ? html`
-                          <!-- Video modus: terug naar Snapshot -->
-                          <button class="btn-play-video" @click="${() => (this.selectedVideoUrl = null)}"><ha-icon icon="mdi:image"></ha-icon> Snapshot</button>
+                    <!-- Snapshot knop(pen): Verberg actieve snapshot als er geen video gekeken wordt -->
+                    ${hasSnapshots
+                      ? currentRes.snapshots.map((img, i) => {
+                          const isCurrentSnapshot = !this.selectedVideoUrl && img.url === activeSnapshotUrl;
+                          if (isCurrentSnapshot) return html``;
 
-                          <!-- Videoknoppen in videomodus: Alleen tonen als er MEER dan 1 video is -->
-                          ${hasMultipleVideos
-                            ? currentRes.videos.map(
-                                (vid, i) => html`
-                                  <button class="btn-play-video ${vid.url === this.selectedVideoUrl ? 'active' : ''}" @click="${() => (this.selectedVideoUrl = vid.url)}">
-                                    <ha-icon icon="mdi:play"></ha-icon>
-                                    Video ${i + 1}
-                                  </button>
-                                `,
-                              )
-                            : html``}
-                        `
-                      : html`
-                          <!-- Snapshot modus: Video & Timelapse knoppen onder de foto -->
-                          ${hasVideos ? html` <button class="btn-play-video" @click="${() => (this.selectedVideoUrl = currentRes.videos[0].url)}"><ha-icon icon="mdi:play"></ha-icon> Video</button> ` : html``}
+                          return html`
+                            <button
+                              class="btn-play-video"
+                              @click="${() => {
+                                this.selectedVideoUrl = null;
+                                this.selectedSnapshotUrl = img.url;
+                              }}"
+                            >
+                              <ha-icon icon="mdi:image"></ha-icon>
+                              ${hasMultipleSnapshots ? `Snapshot ${i + 1}` : 'Snapshot'}
+                            </button>
+                          `;
+                        })
+                      : html``}
 
-                          <button class="btn-play-video ${this.isPlayingTimelapse ? 'active' : ''}" @click="${() => this._toggleTimelapse()}"><ha-icon icon="${this.isPlayingTimelapse ? 'mdi:pause' : 'mdi:play'}"></ha-icon> Timelapse</button>
-                        `}
+                    <!-- Video knop(pen): Verberg de momenteel spelende video -->
+                    ${hasVideos
+                      ? currentRes.videos.map((vid, i) => {
+                          const isCurrentVideo = vid.url === this.selectedVideoUrl;
+                          if (isCurrentVideo) return html``;
+
+                          return html`
+                            <button
+                              class="btn-play-video"
+                              @click="${() => (this.selectedVideoUrl = vid.url)}"
+                            >
+                              <ha-icon icon="mdi:play"></ha-icon>
+                              ${hasMultipleVideos ? `Video ${i + 1}` : 'Video'}
+                            </button>
+                          `;
+                        })
+                      : html``}
+
+                    <!-- Timelapse knop (altijd zichtbaar) -->
+                    <button class="btn-play-video ${this.isPlayingTimelapse ? 'active' : ''}" @click="${() => this._toggleTimelapse()}">
+                      <ha-icon icon="${this.isPlayingTimelapse ? 'mdi:pause' : 'mdi:play'}"></ha-icon> Timelapse
+                    </button>
                   </div>
                 </div>
               </div>
@@ -224,6 +277,7 @@ class GalleryCard extends LitElement {
 
   _openModal() {
     this.selectedVideoUrl = null;
+    this.selectedSnapshotUrl = null;
     this.menuOpen = false;
     this.modalOpen = true;
   }
@@ -231,6 +285,7 @@ class GalleryCard extends LitElement {
   _closeModal() {
     this.modalOpen = false;
     this.selectedVideoUrl = null;
+    this.selectedSnapshotUrl = null;
     this.menuOpen = false;
   }
 
@@ -272,6 +327,7 @@ class GalleryCard extends LitElement {
   _selectResource(index) {
     this.menuOpen = false;
     this.selectedVideoUrl = null;
+    this.selectedSnapshotUrl = null;
 
     if (!this.resources || this.resources.length === 0) return;
 
@@ -283,16 +339,18 @@ class GalleryCard extends LitElement {
   }
 
   _getResource(index) {
-    return this.resources !== undefined && index !== undefined && this.resources.length > 0
-      ? this.resources[index]
-      : {
-          url: '',
-          name: '',
-          extension: 'jpg',
-          caption: index === undefined ? 'Laden...' : 'Geen media gevonden',
-          index: 0,
-          videos: [],
-        };
+    if (this.resources !== undefined && index !== undefined && this.resources.length > 0) {
+      return this.resources[index];
+    }
+    return {
+      url: '',
+      name: '',
+      extension: 'jpg',
+      caption: index === undefined ? 'Laden...' : 'Geen media gevonden',
+      index: 0,
+      snapshots: [],
+      videos: [],
+    };
   }
 
   _currentResource() {
@@ -352,40 +410,68 @@ class GalleryCard extends LitElement {
     for (const item of rawResources) {
       const parsedDate = dayjs(item.name, this.config.file_name_format);
       const timestamp = parsedDate.isValid() ? parsedDate.valueOf() : 0;
-      const resourceWithTime = { ...item, timestamp };
+      const enriched = { ...item, timestamp };
 
       if (this._isImageExtension(item.extension)) {
-        snapshots.push({ ...resourceWithTime, videos: [] });
+        snapshots.push(enriched);
       } else {
-        videos.push(resourceWithTime);
+        videos.push(enriched);
       }
     }
 
-    if (snapshots.length === 0) return [];
+    snapshots.sort((a, b) => a.timestamp - b.timestamp);
+    videos.sort((a, b) => a.timestamp - b.timestamp);
+
+    const events = [];
+    const SNAPSHOT_WINDOW_MS = 25 * 1000;
 
     for (const video of videos) {
-      let closestSnapshot = null;
-      let smallestDiff = Infinity;
+      const matchingSnapshot = snapshots.find(
+        (snap) => snap.timestamp >= video.timestamp && snap.timestamp <= video.timestamp + SNAPSHOT_WINDOW_MS
+      );
 
-      for (const snapshot of snapshots) {
-        const diff = Math.abs(video.timestamp - snapshot.timestamp);
-        if (diff < smallestDiff) {
-          smallestDiff = diff;
-          closestSnapshot = snapshot;
+      if (matchingSnapshot) {
+        events.push({
+          url: matchingSnapshot.url,
+          caption: video.caption,
+          timestamp: video.timestamp,
+          snapshots: [matchingSnapshot],
+          videos: [video],
+        });
+      } else {
+        if (events.length > 0) {
+          const lastEvent = events[events.length - 1];
+          lastEvent.videos.push(video);
+        } else {
+          events.push({
+            url: video.url,
+            caption: video.caption,
+            timestamp: video.timestamp,
+            snapshots: [],
+            videos: [video],
+          });
         }
-      }
-
-      if (closestSnapshot) {
-        closestSnapshot.videos.push(video);
       }
     }
 
     for (const snapshot of snapshots) {
-      snapshot.videos.sort((a, b) => a.timestamp - b.timestamp);
+      const alreadyAssigned = events.some((event) =>
+        event.snapshots.some((s) => s.url === snapshot.url)
+      );
+
+      if (!alreadyAssigned) {
+        events.push({
+          url: snapshot.url,
+          caption: snapshot.caption,
+          timestamp: snapshot.timestamp,
+          snapshots: [snapshot],
+          videos: [],
+        });
+      }
     }
 
-    snapshots.sort((a, b) => b.timestamp - a.timestamp);
-    return snapshots;
+    events.sort((a, b) => b.timestamp - a.timestamp);
+    return events;
   }
 
   _loadMediaResource(hass, contentId) {
@@ -426,7 +512,6 @@ class GalleryCard extends LitElement {
       name: fileName,
       extension,
       caption,
-      videos: [],
     };
   }
 
@@ -591,10 +676,11 @@ class GalleryCard extends LitElement {
         border-color: var(--primary-color, #03a9f4);
       }
 
-      /* Control bar ONDER de media (foto of video) in de modal */
+      /* Control bar ONDER de media in de modal */
       .video-selector-bar {
         display: flex;
         justify-content: center;
+        flex-wrap: wrap;
         gap: 10px;
         margin-top: 12px;
         width: 100%;
