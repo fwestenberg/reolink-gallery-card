@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.3.0';
+const ReolinkGalleryCardVersion = '1.3.1';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -33,6 +33,8 @@ class GalleryCard extends LitElement {
       selectedStartDateTime: {},
       selectedEndDateTime: {},
       showDatePickerModal: {},
+      selectedPreset: {},
+      _loading: {},
     };
   }
 
@@ -47,6 +49,8 @@ class GalleryCard extends LitElement {
     this.timelapseTimer = null;
     this.selectedEntityFilter = null;
     this.showDatePickerModal = false;
+    this.selectedPreset = 'today';
+    this._loading = false;
 
     this.selectedStartDateTime = dayjs().startOf('day').format('YYYY-MM-DDTHH:mm');
     this.selectedEndDateTime = dayjs().endOf('day').format('YYYY-MM-DDTHH:mm');
@@ -57,6 +61,7 @@ class GalleryCard extends LitElement {
     this._urlCache = new Map();
     this._pendingResolves = new Map();
     this._imageCache = new Map();
+    this._mediaBrowseCache = new Map();
 
     this._handleKeyDown = this._handleKeyDown.bind(this);
   }
@@ -80,6 +85,7 @@ class GalleryCard extends LitElement {
         yesterday: 'Gisteren',
         last24h: 'Afgelopen 24 uur',
         last7days: 'Afgelopen 7 dagen',
+        lastMonth: 'Afgelopen maand',
         select_date: 'Selecteer datum',
         from: 'Van',
         to: 'Tot',
@@ -98,6 +104,7 @@ class GalleryCard extends LitElement {
         yesterday: 'Yesterday',
         last24h: 'Last 24 hours',
         last7days: 'Last 7 days',
+        lastMonth: 'Last month',
         select_date: 'Select date',
         from: 'From',
         to: 'To',
@@ -116,6 +123,7 @@ class GalleryCard extends LitElement {
         yesterday: 'Gestern',
         last24h: 'Letzte 24 Stunden',
         last7days: 'Letzte 7 Tage',
+        lastMonth: 'Letzter Monat',
         select_date: 'Datum auswählen',
         from: 'Von',
         to: 'Bis',
@@ -134,6 +142,7 @@ class GalleryCard extends LitElement {
         yesterday: 'Hier',
         last24h: 'Dernières 24 heures',
         last7days: '7 derniers jours',
+        lastMonth: 'Dernier mois',
         select_date: 'Sélectionner une date',
         from: 'De',
         to: 'À',
@@ -175,6 +184,7 @@ class GalleryCard extends LitElement {
   }
 
   _setPresetRange(type) {
+    this.selectedPreset = type;
     const now = dayjs();
     if (type === 'today') {
       this.selectedStartDateTime = now.startOf('day').format('YYYY-MM-DDTHH:mm');
@@ -183,25 +193,34 @@ class GalleryCard extends LitElement {
       const y = now.subtract(1, 'day');
       this.selectedStartDateTime = y.startOf('day').format('YYYY-MM-DDTHH:mm');
       this.selectedEndDateTime = y.endOf('day').format('YYYY-MM-DDTHH:mm');
-    } else if (type === 'last24h') {
-      this.selectedStartDateTime = now.subtract(24, 'hour').format('YYYY-MM-DDTHH:mm');
-      this.selectedEndDateTime = now.format('YYYY-MM-DDTHH:mm');
     } else if (type === 'last7days') {
       this.selectedStartDateTime = now.subtract(7, 'day').startOf('day').format('YYYY-MM-DDTHH:mm');
       this.selectedEndDateTime = now.endOf('day').format('YYYY-MM-DDTHH:mm');
+    } else if (type === 'lastMonth') {
+      this.selectedStartDateTime = now.subtract(1, 'month').startOf('day').format('YYYY-MM-DDTHH:mm');
+      this.selectedEndDateTime = now.endOf('day').format('YYYY-MM-DDTHH:mm');
     }
-    this._updateFilteredResources();
+    if (this._hass) {
+      this._loadResources(this._hass);
+    }
   }
 
   _shiftDay(direction) {
+    this.selectedPreset = null;
     const start = dayjs(this.selectedStartDateTime).add(direction, 'day');
     const end = dayjs(this.selectedEndDateTime).add(direction, 'day');
     this.selectedStartDateTime = start.format('YYYY-MM-DDTHH:mm');
     this.selectedEndDateTime = end.format('YYYY-MM-DDTHH:mm');
-    this._updateFilteredResources();
+    if (this._hass) {
+      this._loadResources(this._hass);
+    }
   }
 
   _formatLabelDate() {
+    if (this.selectedPreset) {
+      return this._t(this.selectedPreset);
+    }
+
     const s = dayjs(this.selectedStartDateTime);
     const e = dayjs(this.selectedEndDateTime);
     if (!s.isValid() || !e.isValid()) return this._t('select_date');
@@ -237,15 +256,6 @@ class GalleryCard extends LitElement {
           <span>${this._formatLabelDate()}</span>
         </button>
 
-        <button
-          class="pill-btn"
-          @click="${(e) => {
-            e.stopPropagation();
-            this._setPresetRange('today');
-          }}"
-        >
-          ${this._t('today')}
-        </button>
         <button
           class="icon-nav-btn"
           @click="${(e) => {
@@ -287,19 +297,19 @@ class GalleryCard extends LitElement {
                   </button>
                   <button
                     @click="${() => {
-                      this._setPresetRange('last24h');
-                      this.showDatePickerModal = false;
-                    }}"
-                  >
-                    ${this._t('last24h')}
-                  </button>
-                  <button
-                    @click="${() => {
                       this._setPresetRange('last7days');
                       this.showDatePickerModal = false;
                     }}"
                   >
                     ${this._t('last7days')}
+                  </button>
+                  <button
+                    @click="${() => {
+                      this._setPresetRange('lastMonth');
+                      this.showDatePickerModal = false;
+                    }}"
+                  >
+                    ${this._t('lastMonth')}
                   </button>
                 </div>
                 <div class="popover-custom-range">
@@ -309,8 +319,9 @@ class GalleryCard extends LitElement {
                       type="datetime-local"
                       .value="${this.selectedStartDateTime || ''}"
                       @change="${(e) => {
+                        this.selectedPreset = null;
                         this.selectedStartDateTime = e.target.value;
-                        this._updateFilteredResources();
+                        if (this._hass) this._loadResources(this._hass);
                       }}"
                     />
                   </div>
@@ -320,8 +331,9 @@ class GalleryCard extends LitElement {
                       type="datetime-local"
                       .value="${this.selectedEndDateTime || ''}"
                       @change="${(e) => {
+                        this.selectedPreset = null;
                         this.selectedEndDateTime = e.target.value;
-                        this._updateFilteredResources();
+                        if (this._hass) this._loadResources(this._hass);
                       }}"
                     />
                   </div>
@@ -338,7 +350,7 @@ class GalleryCard extends LitElement {
 
   render() {
     const hasResources = this.resources && this.resources.length > 0;
-    const isLoading = this.resources === undefined;
+    const isLoading = this._loading || this.resources === undefined;
     const currentRes = this._currentResource();
 
     const activeSnapshot = currentRes.snapshots && currentRes.snapshots.length > 0 ? currentRes.snapshots.find((s) => s.url && s.url === this.selectedSnapshotUrl) || currentRes.snapshots[0] : null;
@@ -351,6 +363,9 @@ class GalleryCard extends LitElement {
     const hasVideos = currentRes.videos && currentRes.videos.length > 0;
     const hasMultipleVideos = currentRes.videos && currentRes.videos.length > 1;
     const colorScheme = this._isDarkMode() ? 'dark' : 'light';
+
+    const isAtStart = this.currentResourceIndex <= 0;
+    const isAtEnd = !this.resources || this.currentResourceIndex >= this.resources.length - 1;
 
     return html`
       <ha-card style="color-scheme: ${colorScheme};" @click="${() => (this.showDatePickerModal = false)}">
@@ -377,6 +392,7 @@ class GalleryCard extends LitElement {
             ? html`
                 <button
                   class="btn btn-left"
+                  ?disabled="${isAtStart}"
                   @click="${(e) => {
                     e.stopPropagation();
                     this._selectResource(this.currentResourceIndex - 1);
@@ -386,6 +402,7 @@ class GalleryCard extends LitElement {
                 </button>
                 <button
                   class="btn btn-right"
+                  ?disabled="${isAtEnd}"
                   @click="${(e) => {
                     e.stopPropagation();
                     this._selectResource(this.currentResourceIndex + 1);
@@ -446,17 +463,20 @@ class GalleryCard extends LitElement {
                   </div>
 
                   <div class="modal-media-wrapper" @touchstart="${(event) => this._handleTouchStart(event)}" @touchend="${(event) => this._handleTouchEnd(event)}">
-                    ${!hasResources
-                      ? html`<div class="no-media-box"><span class="placeholder-text">${this._t('no_media')}</span></div>`
-                      : this.selectedVideoUrl
-                        ? html` <video controls autoplay src="${this.selectedVideoUrl}" @ended="${() => this._handleVideoEnded()}"></video> `
-                        : activeIsVideoFrame
-                          ? html` <video class="modal-img" preload="metadata" muted playsinline src="${activeSnapshotUrl}#t=0.5"></video> `
-                          : html` <img src="${activeSnapshotUrl}" class="modal-img" /> `}
+                    ${isLoading
+                      ? html`<div class="no-media-box"><span class="placeholder-text">${this._t('loading')}</span></div>`
+                      : !hasResources
+                        ? html`<div class="no-media-box"><span class="placeholder-text">${this._t('no_media')}</span></div>`
+                        : this.selectedVideoUrl
+                          ? html` <video controls autoplay src="${this.selectedVideoUrl}" @ended="${() => this._handleVideoEnded()}"></video> `
+                          : activeIsVideoFrame
+                            ? html` <video class="modal-img" preload="metadata" muted playsinline src="${activeSnapshotUrl}#t=0.5"></video> `
+                            : html` <img src="${activeSnapshotUrl}" class="modal-img" /> `}
                     ${hasResources
                       ? html`
                           <button
                             class="btn btn-left"
+                            ?disabled="${isAtStart}"
                             @click="${(e) => {
                               e.stopPropagation();
                               this._selectResource(this.currentResourceIndex - 1);
@@ -466,6 +486,7 @@ class GalleryCard extends LitElement {
                           </button>
                           <button
                             class="btn btn-right"
+                            ?disabled="${isAtEnd}"
                             @click="${(e) => {
                               e.stopPropagation();
                               this._selectResource(this.currentResourceIndex + 1);
@@ -569,6 +590,8 @@ class GalleryCard extends LitElement {
     this.isPlayingTimelapse = true;
     const duration = (parseFloat(this.config.timelapse_duration) || 0.5) * 1000;
 
+    this._preloadAhead(this.currentResourceIndex, 25);
+
     this.timelapseTimer = setInterval(() => {
       this._selectNextTimelapseItem();
     }, duration);
@@ -652,7 +675,7 @@ class GalleryCard extends LitElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this.resources === undefined) {
+    if (this.resources === undefined && !this._loading) {
       this._loadResources(this._hass);
     }
   }
@@ -677,11 +700,9 @@ class GalleryCard extends LitElement {
 
     if (!this.resources || this.resources.length === 0) return;
 
-    let nextResourceIndex = index;
-    if (index < 0) nextResourceIndex = this.resources.length - 1;
-    else if (index >= this.resources.length) nextResourceIndex = 0;
+    if (index < 0 || index >= this.resources.length) return;
 
-    this.currentResourceIndex = nextResourceIndex;
+    this.currentResourceIndex = index;
 
     const currentRes = this._currentResource();
     if (currentRes) {
@@ -701,7 +722,7 @@ class GalleryCard extends LitElement {
       this.requestUpdate();
     }
 
-    this._preloadAhead(this.currentResourceIndex, 15);
+    this._preloadAhead(this.currentResourceIndex, 20);
   }
 
   _getResource(index) {
@@ -752,6 +773,8 @@ class GalleryCard extends LitElement {
     const commands = [];
     this.currentResourceIndex = undefined;
     this.resources = [];
+    this._loading = true;
+    this.requestUpdate();
 
     for (const entity of this.entityConfigs) {
       if (entity.path.substring(0, 15).toLowerCase() === 'media-source://') {
@@ -759,10 +782,17 @@ class GalleryCard extends LitElement {
       }
     }
 
-    Promise.all(commands).then((resources) => {
-      this._allRawResources = resources.filter((result) => !result.error).flat(Number.POSITIVE_INFINITY);
-      this._updateFilteredResources();
-    });
+    Promise.all(commands)
+      .then((resources) => {
+        this._allRawResources = resources.filter((result) => !result.error).flat(Number.POSITIVE_INFINITY);
+        this._loading = false;
+        this._updateFilteredResources();
+      })
+      .catch((err) => {
+        console.error('Fout bij laden van resources:', err);
+        this._loading = false;
+        this.requestUpdate();
+      });
   }
 
   _updateFilteredResources() {
@@ -953,34 +983,85 @@ class GalleryCard extends LitElement {
     });
   }
 
-  async _loadMedia(hass, contentId, recursive = false) {
+  async _browseMediaCached(hass, contentId) {
+    if (this._mediaBrowseCache.has(contentId)) {
+      return this._mediaBrowseCache.get(contentId);
+    }
     try {
       const result = await hass.callWS({ type: 'media_source/browse_media', media_content_id: contentId });
       const children = result.children || [];
-      let files = [];
-      const subPromises = [];
-
-      for (const item of children) {
-        const isDirectory = item.can_expand || item.media_class === 'directory';
-        const isMedia = item.media_class === 'image' || item.media_class === 'video';
-
-        if (isMedia) {
-          files.push(item);
-        } else if (recursive && isDirectory) {
-          subPromises.push(this._loadMedia(hass, item.media_content_id, true));
-        }
-      }
-
-      if (subPromises.length > 0) {
-        const subResults = await Promise.all(subPromises);
-        files = files.concat(subResults.flat());
-      }
-
-      return files;
+      this._mediaBrowseCache.set(contentId, children);
+      return children;
     } catch (e) {
       console.error('Fout bij ophalen media:', e);
       return [];
     }
+  }
+
+  _shouldSkipFolder(folderTitle, startMs, endMs) {
+    if (!startMs || !endMs || !folderTitle) return false;
+
+    const cleanTitle = folderTitle.trim();
+    let folderStart = null;
+    let folderEnd = null;
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleanTitle) || /^\d{8}$/.test(cleanTitle)) {
+      const d = dayjs(cleanTitle.replace(/-/g, ''), 'YYYYMMDD');
+      if (d.isValid()) {
+        folderStart = d.startOf('day').valueOf();
+        folderEnd = d.endOf('day').valueOf();
+      }
+    } else if (/^\d{4}-\d{2}$/.test(cleanTitle) || /^\d{6}$/.test(cleanTitle)) {
+      const d = dayjs(cleanTitle.replace(/-/g, ''), 'YYYYMM');
+      if (d.isValid()) {
+        folderStart = d.startOf('month').valueOf();
+        folderEnd = d.endOf('month').valueOf();
+      }
+    } else if (/^\d{4}$/.test(cleanTitle)) {
+      const d = dayjs(cleanTitle, 'YYYY');
+      if (d.isValid()) {
+        folderStart = d.startOf('year').valueOf();
+        folderEnd = d.endOf('year').valueOf();
+      }
+    }
+
+    if (folderStart && folderEnd) {
+      if (folderEnd < startMs || folderStart > endMs) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  async _loadMedia(hass, contentId, recursive = false) {
+    const children = await this._browseMediaCached(hass, contentId);
+    let files = [];
+    const subPromises = [];
+
+    const startMs = this.selectedStartDateTime ? dayjs(this.selectedStartDateTime).valueOf() : null;
+    const endMs = this.selectedEndDateTime ? dayjs(this.selectedEndDateTime).valueOf() : null;
+
+    for (const item of children) {
+      const isDirectory = item.can_expand || item.media_class === 'directory';
+      const isMedia = item.media_class === 'image' || item.media_class === 'video';
+
+      if (isMedia) {
+        files.push(item);
+      } else if (recursive && isDirectory) {
+        if (this._shouldSkipFolder(item.title, startMs, endMs)) {
+          continue;
+        }
+        subPromises.push(this._loadMedia(hass, item.media_content_id, true));
+      }
+    }
+
+    if (subPromises.length > 0) {
+      const subResults = await Promise.all(subPromises);
+      files = files.concat(subResults.flat());
+    }
+
+    return files;
   }
 
   _createFileResourceFromItem(item) {
@@ -1035,7 +1116,7 @@ class GalleryCard extends LitElement {
     return promise;
   }
 
-  _preloadAhead(startIndex, amount = 15) {
+  _preloadAhead(startIndex, amount = 20) {
     if (!this.resources || this.resources.length === 0) return;
 
     for (let i = startIndex; i < startIndex + amount && i < this.resources.length; i++) {
@@ -1046,6 +1127,9 @@ class GalleryCard extends LitElement {
         if (url && this._isImageExtension(res.extension) && !this._imageCache.has(url)) {
           const img = new Image();
           img.src = url;
+          if (img.decode) {
+            img.decode().catch(() => {});
+          }
           this._imageCache.set(url, img);
         }
       });
@@ -1089,7 +1173,7 @@ class GalleryCard extends LitElement {
         font-weight: 500;
         padding: 20px;
         text-align: center;
-        pointer-events: auto; /* Zorgt dat er op de tekst geklikt kan worden */
+        pointer-events: auto;
       }
       .no-media-box {
         display: flex;
@@ -1136,12 +1220,19 @@ class GalleryCard extends LitElement {
         cursor: pointer;
         border-radius: 4px;
         z-index: 2;
+        transition: opacity 0.2s ease;
       }
       .btn-left {
         left: 10px;
       }
       .btn-right {
         right: 10px;
+      }
+      .btn[disabled],
+      .btn:disabled {
+        opacity: 0.25;
+        cursor: not-allowed;
+        pointer-events: none;
       }
 
       .card-controls {
@@ -1182,7 +1273,6 @@ class GalleryCard extends LitElement {
         background: rgba(0, 0, 0, 0.05);
       }
 
-      /* Dynamische datumprikker bar voor licht & donker thema */
       .ha-energy-date-bar {
         position: relative;
         display: flex;
@@ -1212,20 +1302,6 @@ class GalleryCard extends LitElement {
       .date-display-btn ha-icon {
         --mdc-icon-size: 18px;
         color: var(--primary-text-color, #212121);
-      }
-
-      .pill-btn {
-        background: var(--primary-color, #03a9f4);
-        color: var(--text-primary-color, #ffffff);
-        border: none;
-        border-radius: 12px;
-        padding: 3px 10px;
-        font-size: 12px;
-        font-weight: bold;
-        cursor: pointer;
-      }
-      .pill-btn:hover {
-        opacity: 0.85;
       }
 
       .icon-nav-btn {
@@ -1352,10 +1428,6 @@ class GalleryCard extends LitElement {
         align-items: center;
         box-sizing: border-box;
 
-        /* De modal is altijd een donkere lightbox, los van het HA-thema.
-           Overschrijf hier de HA-thema-variabelen zodat de datumbalk,
-           camera-dropdown en het hamburgermenu binnen de modal altijd
-           donker ogen, ook wanneer Home Assistant in lichte modus staat. */
         --secondary-background-color: rgba(255, 255, 255, 0.08);
         --primary-text-color: #ffffff;
         --secondary-text-color: rgba(255, 255, 255, 0.7);
