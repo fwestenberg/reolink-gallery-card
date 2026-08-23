@@ -42,8 +42,9 @@ type: custom:reolink-gallery-card
 entities:
   - source: media-source://media_source/recordings/frontdoor
     name: Frontdoor
-  - path: media-source://media_source/recordings/garden
+  - path: media-source://media_source/some_folder
     name: Garden
+    recursive: true
 timelapse_duration: 0.5
 video_continuation_interval: 60
 event_interval: 15
