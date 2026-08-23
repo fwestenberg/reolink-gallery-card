@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.1.0';
+const ReolinkGalleryCardVersion = '1.2.0';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -38,6 +38,7 @@ class GalleryCard extends LitElement {
     super();
     this.modalOpen = false;
     this.selectedVideoUrl = null;
+    this.selectedVideoMediaContentId = null;
     this.selectedSnapshotUrl = null;
     this.menuOpen = false;
     this.isPlayingTimelapse = false;
@@ -46,6 +47,12 @@ class GalleryCard extends LitElement {
     this.selectedDateFilter = dayjs().format('YYYY-MM-DD');
     this.entityConfigs = [];
     this._allRawResources = [];
+    
+    // Caching en lazy loading datastructuren
+    this._urlCache = new Map();
+    this._pendingResolves = new Map();
+    this._imageCache = new Map();
+
     this._handleKeyDown = this._handleKeyDown.bind(this);
   }
 
@@ -114,8 +121,14 @@ class GalleryCard extends LitElement {
 
   render() {
     const currentRes = this._currentResource();
-    const activeSnapshotUrl = this.selectedSnapshotUrl || (currentRes.snapshots && currentRes.snapshots.length > 0 ? currentRes.snapshots[0].url : currentRes.url);
-    const activeIsVideoFrame = this._isVideoUrl(activeSnapshotUrl);
+    
+    // Bepaal het actieve snapshot object
+    const activeSnapshot = (currentRes.snapshots && currentRes.snapshots.length > 0)
+      ? (currentRes.snapshots.find(s => s.url && s.url === this.selectedSnapshotUrl) || currentRes.snapshots[0])
+      : null;
+
+    const activeSnapshotUrl = this.selectedSnapshotUrl || (activeSnapshot ? activeSnapshot.url : currentRes.url);
+    const activeIsVideoFrame = this._isVideoUrl(activeSnapshotUrl || currentRes.name);
 
     const hasSnapshots = currentRes.snapshots && currentRes.snapshots.length > 0;
     const hasMultipleSnapshots = currentRes.snapshots && currentRes.snapshots.length > 1;
@@ -131,7 +144,11 @@ class GalleryCard extends LitElement {
           </div>
 
           <div class="media-container" @click="${() => this._openModal()}">
-            ${activeIsVideoFrame ? html`<video class="thumb-video-frame" preload="metadata" muted playsinline src="${activeSnapshotUrl}#t=0.5"></video>` : html`<img src="${activeSnapshotUrl}" />`}
+            ${activeSnapshotUrl
+              ? activeIsVideoFrame
+                ? html`<video class="thumb-video-frame" preload="metadata" muted playsinline src="${activeSnapshotUrl}#t=0.5"></video>`
+                : html`<img src="${activeSnapshotUrl}" />`
+              : html`<div class="loading-spinner">Laden...</div>`}
           </div>
 
           <figcaption class="caption-bar">
@@ -245,14 +262,20 @@ class GalleryCard extends LitElement {
                   <div class="video-selector-bar">
                     ${!this.isPlayingTimelapse && hasSnapshots
                       ? currentRes.snapshots.map((img, i) => {
-                          const isCurrentSnapshot = !this.selectedVideoUrl && img.url === activeSnapshotUrl;
+                          const isCurrentSnapshot = !this.selectedVideoUrl && activeSnapshot && (
+                            img === activeSnapshot || 
+                            (img.media_content_id && activeSnapshot.media_content_id && img.media_content_id === activeSnapshot.media_content_id)
+                          );
 
                           return html`
                             <button
                               class="btn-play-video ${isCurrentSnapshot ? 'active' : ''}"
-                              @click="${() => {
+                              @click="${async () => {
+                                if (!img.url) await this._resolveResourceUrl(img);
                                 this.selectedVideoUrl = null;
+                                this.selectedVideoMediaContentId = null;
                                 this.selectedSnapshotUrl = img.url;
+                                this.requestUpdate();
                               }}"
                             >
                               <ha-icon icon="mdi:image"></ha-icon>
@@ -264,12 +287,19 @@ class GalleryCard extends LitElement {
 
                     ${!this.isPlayingTimelapse && hasVideos
                       ? currentRes.videos.map((vid, i) => {
-                          const isCurrentVideo = vid.url === this.selectedVideoUrl;
+                          const isCurrentVideo = !!this.selectedVideoUrl && (
+                            (vid.url && vid.url === this.selectedVideoUrl) ||
+                            (this.selectedVideoMediaContentId && vid.media_content_id === this.selectedVideoMediaContentId)
+                          );
 
                           return html`
                             <button
                               class="btn-play-video ${isCurrentVideo ? 'active' : ''}"
-                              @click="${() => this._handleVideoClick(vid)}"
+                              @click="${async () => {
+                                if (!vid.url) await this._resolveResourceUrl(vid);
+                                this.selectedVideoMediaContentId = vid.media_content_id;
+                                this._handleVideoClick(vid);
+                              }}"
                             >
                               <ha-icon icon="mdi:play"></ha-icon>
                               ${hasMultipleVideos ? `Video ${i + 1}` : 'Video'}
@@ -293,6 +323,7 @@ class GalleryCard extends LitElement {
 
   _handleVideoClick(vid) {
     this.selectedVideoUrl = vid.url;
+    this.requestUpdate();
   }
 
   _handleVideoEnded() {
@@ -317,7 +348,7 @@ class GalleryCard extends LitElement {
     }
 
     this.isPlayingTimelapse = true;
-    const duration = (parseFloat(this.config.timelapse_duration) || 3) * 1000;
+    const duration = (parseFloat(this.config.timelapse_duration) || 0.5) * 1000;
 
     this.timelapseTimer = setInterval(() => {
       this._selectNextTimelapseItem();
@@ -338,10 +369,12 @@ class GalleryCard extends LitElement {
       clearInterval(this.timelapseTimer);
       this.timelapseTimer = null;
     }
+    this.requestUpdate();
   }
 
   _openModal() {
     this.selectedVideoUrl = null;
+    this.selectedVideoMediaContentId = null;
     this.selectedSnapshotUrl = null;
     this.menuOpen = false;
     this.modalOpen = true;
@@ -350,6 +383,7 @@ class GalleryCard extends LitElement {
   _closeModal() {
     this.modalOpen = false;
     this.selectedVideoUrl = null;
+    this.selectedVideoMediaContentId = null;
     this.selectedSnapshotUrl = null;
     this.menuOpen = false;
   }
@@ -370,13 +404,14 @@ class GalleryCard extends LitElement {
     this.entityConfigs = config.entities.map((item, index) => {
       if (typeof item === 'string') {
         const fallbackName = decodeURIComponent(item.split('/').filter(Boolean).pop() || `Camera ${index + 1}`);
-        return { path: item, name: fallbackName };
+        return { path: item, name: fallbackName, recursive: false };
       }
       const path = item.path || item.entity || item.media_source || item.source || '';
       const fallbackName = decodeURIComponent(path.split('/').filter(Boolean).pop() || `Camera ${index + 1}`);
       return {
         path: path,
         name: item.name || fallbackName,
+        recursive: !!item.recursive,
       };
     });
 
@@ -408,7 +443,8 @@ class GalleryCard extends LitElement {
   }
 
   _isImageExtension(extension) {
-    return extension.match(/(jpeg|jpg|gif|png|tiff|bmp)$/i);
+    if (!extension) return true;
+    return !!extension.match(/(jpeg|jpg|gif|png|tiff|bmp)$/i);
   }
 
   _isVideoUrl(url) {
@@ -417,7 +453,7 @@ class GalleryCard extends LitElement {
     return !this._isImageExtension(ext);
   }
 
-  _selectResource(index) {
+  async _selectResource(index) {
     this.menuOpen = false;
 
     if (!this.resources || this.resources.length === 0) return;
@@ -429,8 +465,24 @@ class GalleryCard extends LitElement {
     this.currentResourceIndex = nextResourceIndex;
 
     const currentRes = this._currentResource();
-    this.selectedVideoUrl = null;
-    this.selectedSnapshotUrl = currentRes.url;
+    if (currentRes) {
+      if (!currentRes.url && currentRes.media_content_id) {
+        await this._resolveResourceUrl(currentRes);
+      }
+      if (currentRes.snapshots) {
+        currentRes.snapshots.forEach((s) => this._resolveResourceUrl(s));
+      }
+      if (currentRes.videos) {
+        currentRes.videos.forEach((v) => this._resolveResourceUrl(v));
+      }
+
+      this.selectedVideoUrl = null;
+      this.selectedVideoMediaContentId = null;
+      this.selectedSnapshotUrl = currentRes.url;
+      this.requestUpdate();
+    }
+
+    this._preloadAhead(this.currentResourceIndex, 15);
   }
 
   _getResource(index) {
@@ -510,12 +562,16 @@ class GalleryCard extends LitElement {
     }
 
     this.resources = this._groupReolinkMedia(filtered);
-    this.currentResourceIndex = 0;
-
-    this.selectedVideoUrl = null;
-    this.selectedSnapshotUrl = null;
-
-    this.requestUpdate();
+    
+    if (this.resources.length > 0) {
+      this._selectResource(0);
+    } else {
+      this.currentResourceIndex = 0;
+      this.selectedVideoUrl = null;
+      this.selectedVideoMediaContentId = null;
+      this.selectedSnapshotUrl = null;
+      this.requestUpdate();
+    }
   }
 
   _parseTimestamp(fileName) {
@@ -541,7 +597,7 @@ class GalleryCard extends LitElement {
     const allItems = rawResources
       .map((item) => ({
         ...item,
-        timestamp: this._parseTimestamp(item.name),
+        timestamp: item.timestamp || this._parseTimestamp(item.name),
       }))
       .filter((item) => item.timestamp > 0);
 
@@ -627,7 +683,8 @@ class GalleryCard extends LitElement {
       if (event.snapshots.length > 0) {
         event.snapshots.forEach((snap) => {
           flatResources.push({
-            url: snap.url,
+            media_content_id: snap.media_content_id,
+            url: snap.url || null,
             name: snap.name,
             extension: snap.extension,
             caption: fullCaption,
@@ -639,7 +696,8 @@ class GalleryCard extends LitElement {
       } else if (event.videos.length > 0) {
         const firstVideo = event.videos[0];
         flatResources.push({
-          url: firstVideo.url,
+          media_content_id: firstVideo.media_content_id,
+          url: firstVideo.url || null,
           name: firstVideo.name,
           extension: firstVideo.extension,
           caption: fullCaption,
@@ -655,11 +713,11 @@ class GalleryCard extends LitElement {
 
   _loadMediaResource(hass, entity) {
     return new Promise((resolve) => {
-      this._loadMedia(hass, entity.path)
-        .then((values) => {
-          const resources = values
+      this._loadMedia(hass, entity.path, entity.recursive)
+        .then((items) => {
+          const resources = items
             .map((item) => {
-              const res = this._createFileResource(item.authenticated_path);
+              const res = this._createFileResourceFromItem(item);
               if (res) {
                 res.entityPath = entity.path;
                 res.entityName = entity.name;
@@ -673,26 +731,103 @@ class GalleryCard extends LitElement {
     });
   }
 
-  _loadMedia(hass, contentId) {
-    return hass.callWS({ type: 'media_source/browse_media', media_content_id: contentId }).then((result) => {
-      let children = result.children || [];
-      children = children.filter((item) => item.media_class === 'image' || item.media_class === 'video');
+  async _loadMedia(hass, contentId, recursive = false) {
+    try {
+      const result = await hass.callWS({ type: 'media_source/browse_media', media_content_id: contentId });
+      const children = result.children || [];
+      let files = [];
+      const subPromises = [];
 
-      return Promise.all(children.map((item) => hass.callWS({ type: 'media_source/resolve_media', media_content_id: item.media_content_id, expires: 10800 }).then((auth) => ({ ...item, authenticated_path: auth.url }))));
-    });
+      for (const item of children) {
+        const isDirectory = item.can_expand || item.media_class === 'directory';
+        const isMedia = item.media_class === 'image' || item.media_class === 'video';
+
+        if (isMedia) {
+          files.push(item);
+        } else if (recursive && isDirectory) {
+          subPromises.push(this._loadMedia(hass, item.media_content_id, true));
+        }
+      }
+
+      if (subPromises.length > 0) {
+        const subResults = await Promise.all(subPromises);
+        files = files.concat(subResults.flat());
+      }
+
+      return files;
+    } catch (e) {
+      console.error('Fout bij ophalen media:', e);
+      return [];
+    }
   }
 
-  _createFileResource(fileRawUrl) {
-    const fileUrl = fileRawUrl.split('?')[0];
-    const fileName = decodeURIComponent(fileUrl.split('/').at(-1));
+  _createFileResourceFromItem(item) {
+    const rawPath = item.media_content_id || item.title || '';
+    const cleanPath = rawPath.split('?')[0];
+    const fileName = item.title && item.title.includes('.') 
+      ? item.title 
+      : decodeURIComponent(cleanPath.split('/').at(-1));
     const extension = fileName.split('.').at(-1).toLowerCase();
 
     return {
-      url: fileRawUrl,
+      media_content_id: item.media_content_id,
+      url: null,
       name: fileName,
-      extension,
+      extension: extension,
       caption: fileName,
     };
+  }
+
+  _resolveResourceUrl(res) {
+    if (!res) return Promise.resolve(null);
+    if (res.url) return Promise.resolve(res.url);
+
+    if (this._urlCache.has(res.media_content_id)) {
+      res.url = this._urlCache.get(res.media_content_id);
+      return Promise.resolve(res.url);
+    }
+
+    if (this._pendingResolves.has(res.media_content_id)) {
+      return this._pendingResolves.get(res.media_content_id);
+    }
+
+    const promise = this._hass
+      .callWS({
+        type: 'media_source/resolve_media',
+        media_content_id: res.media_content_id,
+        expires: 10800,
+      })
+      .then((auth) => {
+        res.url = auth.url;
+        this._urlCache.set(res.media_content_id, auth.url);
+        this._pendingResolves.delete(res.media_content_id);
+        return auth.url;
+      })
+      .catch((err) => {
+        console.error('Fout bij resolven van media URL:', err);
+        this._pendingResolves.delete(res.media_content_id);
+        return null;
+      });
+
+    this._pendingResolves.set(res.media_content_id, promise);
+    return promise;
+  }
+
+  _preloadAhead(startIndex, amount = 15) {
+    if (!this.resources || this.resources.length === 0) return;
+
+    for (let i = startIndex; i < startIndex + amount && i < this.resources.length; i++) {
+      const res = this.resources[i];
+      if (!res) continue;
+
+      this._resolveResourceUrl(res).then((url) => {
+        if (url && this._isImageExtension(res.extension) && !this._imageCache.has(url)) {
+          const img = new Image();
+          img.src = url;
+          this._imageCache.set(url, img);
+        }
+      });
+    }
   }
 
   static get styles() {
@@ -723,6 +858,10 @@ class GalleryCard extends LitElement {
         background: #000;
         width: 100%;
         min-height: 250px;
+      }
+      .loading-spinner {
+        color: #fff;
+        font-size: 14px;
       }
       img,
       .thumb-video-frame {
@@ -841,7 +980,6 @@ class GalleryCard extends LitElement {
         box-sizing: border-box;
       }
 
-      /* Bovenbalk in de modal (Entity + Datum + Hamburger + Sluitknop) */
       .modal-top-bar {
         position: relative;
         width: 100%;
