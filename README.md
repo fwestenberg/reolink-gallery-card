@@ -39,9 +39,11 @@ Add the card to your Lovelace dashboard using the code editor:
 
 ```yaml
 type: custom:reolink-gallery-card
-file_name_format: ___________YYYYMMDDHHmmss
-caption_format: DD-MM-YYYY - HH:mm
 entities:
-  - path: media-source://media_source/local/recordings/frontdoor
-  - path: media-source://media_source/local/recordings/garden
+  - source: media-source://media_source/recordings/frontdoor
+    name: Frontdoor
+  - path: media-source://media_source/recordings/garden
+    name: Garden
 timelapse_duration: 0.5
+video_continuation_interval: 60
+event_interval: 15
