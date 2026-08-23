@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.0.2';
+const ReolinkGalleryCardVersion = '1.1.0';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -29,6 +29,8 @@ class GalleryCard extends LitElement {
       modalOpen: {},
       menuOpen: {},
       isPlayingTimelapse: {},
+      selectedEntityFilter: {},
+      selectedDateFilter: {},
     };
   }
 
@@ -40,6 +42,10 @@ class GalleryCard extends LitElement {
     this.menuOpen = false;
     this.isPlayingTimelapse = false;
     this.timelapseTimer = null;
+    this.selectedEntityFilter = null;
+    this.selectedDateFilter = dayjs().format('YYYY-MM-DD');
+    this.entityConfigs = [];
+    this._allRawResources = [];
     this._handleKeyDown = this._handleKeyDown.bind(this);
   }
 
@@ -66,10 +72,50 @@ class GalleryCard extends LitElement {
     }
   }
 
+  _handleEntityFilterChange(event) {
+    event.stopPropagation();
+    this.selectedEntityFilter = event.target.value;
+    this._updateFilteredResources();
+  }
+
+  _handleDateFilterChange(event) {
+    event.stopPropagation();
+    this.selectedDateFilter = event.target.value;
+    this._updateFilteredResources();
+  }
+
+  _renderEntityDropdown() {
+    if (!this.entityConfigs || this.entityConfigs.length <= 1) return html``;
+
+    return html`
+      <select class="entity-dropdown" .value="${this.selectedEntityFilter}" @change="${(e) => this._handleEntityFilterChange(e)}">
+        ${this.entityConfigs.map(
+          (entity) => html`
+            <option value="${entity.path}" ?selected="${this.selectedEntityFilter === entity.path}">
+              ${entity.name}
+            </option>
+          `
+        )}
+        <option value="all" ?selected="${this.selectedEntityFilter === 'all'}">All</option>
+      </select>
+    `;
+  }
+
+  _renderDateFilter() {
+    return html`
+      <input
+        type="date"
+        class="date-picker-input"
+        .value="${this.selectedDateFilter || ''}"
+        @change="${(e) => this._handleDateFilterChange(e)}"
+      />
+    `;
+  }
+
   render() {
     const currentRes = this._currentResource();
-
-    const activeSnapshotUrl = this.selectedSnapshotUrl || (currentRes.snapshots.length > 0 ? currentRes.snapshots[0].url : currentRes.url);
+    const activeSnapshotUrl = this.selectedSnapshotUrl || (currentRes.snapshots && currentRes.snapshots.length > 0 ? currentRes.snapshots[0].url : currentRes.url);
+    const activeIsVideoFrame = this._isVideoUrl(activeSnapshotUrl);
 
     const hasSnapshots = currentRes.snapshots && currentRes.snapshots.length > 0;
     const hasMultipleSnapshots = currentRes.snapshots && currentRes.snapshots.length > 1;
@@ -78,17 +124,20 @@ class GalleryCard extends LitElement {
 
     return html`
       <ha-card>
-        <!-- Hoofdvenster: Dashboard weergave met Swipe functionaliteit -->
         <div class="resource-viewer" @touchstart="${(event) => this._handleTouchStart(event)}" @touchend="${(event) => this._handleTouchEnd(event)}">
+          <div class="main-dropdown-container">
+            ${this._renderEntityDropdown()}
+            ${this._renderDateFilter()}
+          </div>
+
           <div class="media-container" @click="${() => this._openModal()}">
-            <img src="${activeSnapshotUrl}" />
+            ${activeIsVideoFrame ? html`<video class="thumb-video-frame" preload="metadata" muted playsinline src="${activeSnapshotUrl}#t=0.5"></video>` : html`<img src="${activeSnapshotUrl}" />`}
           </div>
 
           <figcaption class="caption-bar">
             <span class="caption-text">${currentRes.caption}</span>
           </figcaption>
 
-          <!-- Navigatie pijlknopen -->
           <button
             class="btn btn-left"
             @click="${(e) => {
@@ -109,7 +158,6 @@ class GalleryCard extends LitElement {
           </button>
         </div>
 
-        <!-- Timelapse knop onder het dashboard kaartje -->
         <div class="card-controls">
           <button class="btn-timelapse ${this.isPlayingTimelapse ? 'active' : ''}" @click="${() => this._toggleTimelapse()}">
             <ha-icon icon="${this.isPlayingTimelapse ? 'mdi:pause' : 'mdi:play'}"></ha-icon>
@@ -117,55 +165,59 @@ class GalleryCard extends LitElement {
           </button>
         </div>
 
-        <!-- Popup Modal voor vergroting snapshot & video afspelen -->
         ${this.modalOpen
           ? html`
               <div id="videoModal" class="modal" @click="${() => this._closeModal()}">
                 <div class="video-modal-container" @click="${(e) => e.stopPropagation()}">
-                  <!-- Hamburger menu rechtsboven -->
-                  <div class="hamburger-container">
-                    <button class="btn-hamburger" @click="${(e) => this._toggleMenu(e)}">
-                      <ha-icon icon="mdi:dots-vertical"></ha-icon>
-                    </button>
+                  
+                  <div class="modal-top-bar">
+                    <div class="dropdown-group">
+                      ${this._renderEntityDropdown()}
+                      ${this._renderDateFilter()}
+                    </div>
 
-                    ${this.menuOpen
-                      ? html`
-                          <div class="hamburger-menu" @click="${(e) => e.stopPropagation()}">
-                            <!-- Download Snapshots -->
-                            ${currentRes.snapshots.map(
-                              (img, i) => html`
-                                <a class="menu-item" href="${img.url}" download target="_blank">
-                                  <ha-icon icon="mdi:file-image-outline"></ha-icon>
-                                  <span>Download snapshot ${hasMultipleSnapshots ? i + 1 : ''}</span>
-                                </a>
-                              `,
-                            )}
+                    <div class="action-group">
+                      <button class="btn-hamburger" @click="${(e) => this._toggleMenu(e)}">
+                        <ha-icon icon="mdi:dots-vertical"></ha-icon>
+                      </button>
 
-                            <!-- Download Video's -->
-                            ${currentRes.videos.map(
-                              (vid, i) => html`
-                                <a class="menu-item" href="${vid.url}" download target="_blank">
-                                  <ha-icon icon="mdi:file-video-outline"></ha-icon>
-                                  <span>Download video ${hasMultipleVideos ? i + 1 : ''}</span>
-                                </a>
-                              `,
-                            )}
-                          </div>
-                        `
-                      : html``}
+                      ${this.menuOpen
+                        ? html`
+                            <div class="hamburger-menu" @click="${(e) => e.stopPropagation()}">
+                              ${currentRes.snapshots.map(
+                                (img, i) => html`
+                                  <a class="menu-item" href="${img.url}" download target="_blank">
+                                    <ha-icon icon="mdi:file-image-outline"></ha-icon>
+                                    <span>Download snapshot ${hasMultipleSnapshots ? i + 1 : ''}</span>
+                                  </a>
+                                `,
+                              )}
 
-                    <button class="btn-close-x" @click="${() => this._closeModal()}">
-                      <ha-icon icon="mdi:close"></ha-icon>
-                    </button>
+                              ${currentRes.videos.map(
+                                (vid, i) => html`
+                                  <a class="menu-item" href="${vid.url}" download target="_blank">
+                                    <ha-icon icon="mdi:file-video-outline"></ha-icon>
+                                    <span>Download video ${hasMultipleVideos ? i + 1 : ''}</span>
+                                  </a>
+                                `,
+                              )}
+                            </div>
+                          `
+                        : html``}
+
+                      <button class="btn-close-x" @click="${() => this._closeModal()}">
+                        <ha-icon icon="mdi:close"></ha-icon>
+                      </button>
+                    </div>
                   </div>
 
-                  <!-- Media Inhoud: Video of Grote Snapshot -->
                   <div class="modal-media-wrapper" @touchstart="${(event) => this._handleTouchStart(event)}" @touchend="${(event) => this._handleTouchEnd(event)}">
                     ${this.selectedVideoUrl
-                      ? html` <video controls autoplay src="${this.selectedVideoUrl}"></video> `
-                      : html` <img src="${activeSnapshotUrl}" class="modal-img" /> `}
+                      ? html` <video controls autoplay src="${this.selectedVideoUrl}" @ended="${() => this._handleVideoEnded()}"></video> `
+                      : activeIsVideoFrame
+                        ? html` <video class="modal-img" preload="metadata" muted playsinline src="${activeSnapshotUrl}#t=0.5"></video> `
+                        : html` <img src="${activeSnapshotUrl}" class="modal-img" /> `}
 
-                    <!-- Bladerpijlen in modal -->
                     <button
                       class="btn btn-left"
                       @click="${(e) => {
@@ -186,17 +238,18 @@ class GalleryCard extends LitElement {
                     </button>
                   </div>
 
-                  <!-- Besturingsbalk ONDER de media -->
+                  <div class="modal-header-info">
+                    <span class="event-time-title">${currentRes.caption}</span>
+                  </div>
+
                   <div class="video-selector-bar">
-                    <!-- Snapshot knop(pen): Verberg actieve snapshot als er geen video gekeken wordt -->
-                    ${hasSnapshots
+                    ${!this.isPlayingTimelapse && hasSnapshots
                       ? currentRes.snapshots.map((img, i) => {
                           const isCurrentSnapshot = !this.selectedVideoUrl && img.url === activeSnapshotUrl;
-                          if (isCurrentSnapshot) return html``;
 
                           return html`
                             <button
-                              class="btn-play-video"
+                              class="btn-play-video ${isCurrentSnapshot ? 'active' : ''}"
                               @click="${() => {
                                 this.selectedVideoUrl = null;
                                 this.selectedSnapshotUrl = img.url;
@@ -209,16 +262,14 @@ class GalleryCard extends LitElement {
                         })
                       : html``}
 
-                    <!-- Video knop(pen): Verberg de momenteel spelende video -->
-                    ${hasVideos
+                    ${!this.isPlayingTimelapse && hasVideos
                       ? currentRes.videos.map((vid, i) => {
                           const isCurrentVideo = vid.url === this.selectedVideoUrl;
-                          if (isCurrentVideo) return html``;
 
                           return html`
                             <button
-                              class="btn-play-video"
-                              @click="${() => (this.selectedVideoUrl = vid.url)}"
+                              class="btn-play-video ${isCurrentVideo ? 'active' : ''}"
+                              @click="${() => this._handleVideoClick(vid)}"
                             >
                               <ha-icon icon="mdi:play"></ha-icon>
                               ${hasMultipleVideos ? `Video ${i + 1}` : 'Video'}
@@ -227,9 +278,9 @@ class GalleryCard extends LitElement {
                         })
                       : html``}
 
-                    <!-- Timelapse knop (altijd zichtbaar) -->
                     <button class="btn-play-video ${this.isPlayingTimelapse ? 'active' : ''}" @click="${() => this._toggleTimelapse()}">
-                      <ha-icon icon="${this.isPlayingTimelapse ? 'mdi:pause' : 'mdi:play'}"></ha-icon> Timelapse
+                      <ha-icon icon="${this.isPlayingTimelapse ? 'mdi:pause' : 'mdi:play'}"></ha-icon>
+                      Timelapse
                     </button>
                   </div>
                 </div>
@@ -238,6 +289,16 @@ class GalleryCard extends LitElement {
           : html``}
       </ha-card>
     `;
+  }
+
+  _handleVideoClick(vid) {
+    this.selectedVideoUrl = vid.url;
+  }
+
+  _handleVideoEnded() {
+    if (this.isPlayingTimelapse) {
+      this._selectNextTimelapseItem();
+    }
   }
 
   _toggleTimelapse() {
@@ -259,12 +320,16 @@ class GalleryCard extends LitElement {
     const duration = (parseFloat(this.config.timelapse_duration) || 3) * 1000;
 
     this.timelapseTimer = setInterval(() => {
-      if (this.currentResourceIndex >= this.resources.length - 1) {
-        this._stopTimelapse();
-      } else {
-        this._selectResource(this.currentResourceIndex + 1);
-      }
+      this._selectNextTimelapseItem();
     }, duration);
+  }
+
+  _selectNextTimelapseItem() {
+    if (this.currentResourceIndex >= this.resources.length - 1) {
+      this._stopTimelapse();
+    } else {
+      this._selectResource(this.currentResourceIndex + 1);
+    }
   }
 
   _stopTimelapse() {
@@ -302,7 +367,29 @@ class GalleryCard extends LitElement {
       throw new Error("Vereiste configuratie 'entities' ontbreekt");
     }
 
-    this.config = config;
+    this.entityConfigs = config.entities.map((item, index) => {
+      if (typeof item === 'string') {
+        const fallbackName = decodeURIComponent(item.split('/').filter(Boolean).pop() || `Camera ${index + 1}`);
+        return { path: item, name: fallbackName };
+      }
+      const path = item.path || item.entity || item.media_source || item.source || '';
+      const fallbackName = decodeURIComponent(path.split('/').filter(Boolean).pop() || `Camera ${index + 1}`);
+      return {
+        path: path,
+        name: item.name || fallbackName,
+      };
+    });
+
+    this.config = {
+      event_interval: 15,
+      video_continuation_interval: 60,
+      caption_format: 'DD-MM-YYYY HH:mm:ss',
+      ...config,
+    };
+
+    if (this.entityConfigs.length > 0) {
+      this.selectedEntityFilter = this.entityConfigs[0].path;
+    }
 
     if (this._hass !== undefined) {
       this._loadResources(this._hass);
@@ -324,10 +411,14 @@ class GalleryCard extends LitElement {
     return extension.match(/(jpeg|jpg|gif|png|tiff|bmp)$/i);
   }
 
+  _isVideoUrl(url) {
+    if (!url) return false;
+    const ext = url.split('?')[0].split('#')[0].split('.').pop();
+    return !this._isImageExtension(ext);
+  }
+
   _selectResource(index) {
     this.menuOpen = false;
-    this.selectedVideoUrl = null;
-    this.selectedSnapshotUrl = null;
 
     if (!this.resources || this.resources.length === 0) return;
 
@@ -336,6 +427,10 @@ class GalleryCard extends LitElement {
     else if (index >= this.resources.length) nextResourceIndex = 0;
 
     this.currentResourceIndex = nextResourceIndex;
+
+    const currentRes = this._currentResource();
+    this.selectedVideoUrl = null;
+    this.selectedSnapshotUrl = currentRes.url;
   }
 
   _getResource(index) {
@@ -387,98 +482,191 @@ class GalleryCard extends LitElement {
     this.currentResourceIndex = undefined;
     this.resources = [];
 
-    for (const entity of this.config.entities) {
-      let entityId = typeof entity === 'object' ? entity.path : entity;
-
-      if (entityId.substring(0, 15).toLowerCase() === 'media-source://') {
-        commands.push(this._loadMediaResource(hass, entityId));
+    for (const entity of this.entityConfigs) {
+      if (entity.path.substring(0, 15).toLowerCase() === 'media-source://') {
+        commands.push(this._loadMediaResource(hass, entity));
       }
     }
 
     Promise.all(commands).then((resources) => {
-      let rawResources = resources.filter((result) => !result.error).flat(Number.POSITIVE_INFINITY);
-      this.resources = this._groupReolinkMedia(rawResources);
-      this.currentResourceIndex = 0;
-      this.requestUpdate();
+      this._allRawResources = resources.filter((result) => !result.error).flat(Number.POSITIVE_INFINITY);
+      this._updateFilteredResources();
     });
   }
 
-  _groupReolinkMedia(rawResources) {
-    const snapshots = [];
-    const videos = [];
+  _updateFilteredResources() {
+    if (!this._allRawResources) return;
+    let filtered = this._allRawResources;
 
-    for (const item of rawResources) {
-      const parsedDate = dayjs(item.name, this.config.file_name_format);
-      const timestamp = parsedDate.isValid() ? parsedDate.valueOf() : 0;
-      const enriched = { ...item, timestamp };
-
-      if (this._isImageExtension(item.extension)) {
-        snapshots.push(enriched);
-      } else {
-        videos.push(enriched);
-      }
+    if (this.selectedEntityFilter && this.selectedEntityFilter !== 'all') {
+      filtered = filtered.filter((r) => r.entityPath === this.selectedEntityFilter);
     }
 
-    snapshots.sort((a, b) => a.timestamp - b.timestamp);
-    videos.sort((a, b) => a.timestamp - b.timestamp);
-
-    const events = [];
-    const SNAPSHOT_WINDOW_MS = 25 * 1000;
-
-    for (const video of videos) {
-      const matchingSnapshot = snapshots.find(
-        (snap) => snap.timestamp >= video.timestamp && snap.timestamp <= video.timestamp + SNAPSHOT_WINDOW_MS
-      );
-
-      if (matchingSnapshot) {
-        events.push({
-          url: matchingSnapshot.url,
-          caption: video.caption,
-          timestamp: video.timestamp,
-          snapshots: [matchingSnapshot],
-          videos: [video],
-        });
-      } else {
-        if (events.length > 0) {
-          const lastEvent = events[events.length - 1];
-          lastEvent.videos.push(video);
-        } else {
-          events.push({
-            url: video.url,
-            caption: video.caption,
-            timestamp: video.timestamp,
-            snapshots: [],
-            videos: [video],
-          });
-        }
-      }
+    if (this.selectedDateFilter) {
+      filtered = filtered.filter((r) => {
+        const itemDate = dayjs(r.timestamp).format('YYYY-MM-DD');
+        return itemDate === this.selectedDateFilter;
+      });
     }
 
-    for (const snapshot of snapshots) {
-      const alreadyAssigned = events.some((event) =>
-        event.snapshots.some((s) => s.url === snapshot.url)
-      );
+    this.resources = this._groupReolinkMedia(filtered);
+    this.currentResourceIndex = 0;
 
-      if (!alreadyAssigned) {
-        events.push({
-          url: snapshot.url,
-          caption: snapshot.caption,
-          timestamp: snapshot.timestamp,
-          snapshots: [snapshot],
-          videos: [],
-        });
-      }
-    }
+    this.selectedVideoUrl = null;
+    this.selectedSnapshotUrl = null;
 
-    events.sort((a, b) => b.timestamp - a.timestamp);
-    return events;
+    this.requestUpdate();
   }
 
-  _loadMediaResource(hass, contentId) {
+  _parseTimestamp(fileName) {
+    if (this.config.file_name_format) {
+      const d = dayjs(fileName, this.config.file_name_format);
+      if (d.isValid()) return d.valueOf();
+    }
+
+    const match = fileName.match(/(\d{4}\d{2}\d{2})_?(\d{2}\d{2}\d{2})/);
+    if (match) {
+      const d = dayjs(`${match[1]}${match[2]}`, 'YYYYMMDDHHmmss');
+      if (d.isValid()) return d.valueOf();
+    }
+
+    const d = dayjs(fileName);
+    return d.isValid() ? d.valueOf() : 0;
+  }
+
+  _groupReolinkMedia(rawResources) {
+    const eventIntervalMs = (parseInt(this.config.event_interval, 10) || 15) * 1000;
+    const videoContinuationMs = (parseInt(this.config.video_continuation_interval, 10) || 60) * 1000;
+
+    const allItems = rawResources
+      .map((item) => ({
+        ...item,
+        timestamp: this._parseTimestamp(item.name),
+      }))
+      .filter((item) => item.timestamp > 0);
+
+    allItems.sort((a, b) => a.timestamp - b.timestamp);
+
+    const videoItems = allItems.filter((i) => !this._isImageExtension(i.extension));
+    const snapshotItems = allItems.filter((i) => this._isImageExtension(i.extension));
+
+    const events = [];
+    videoItems.forEach((vid) => {
+      const lastEvent = events[events.length - 1];
+      if (lastEvent && vid.timestamp - lastEvent.lastVideoTimestamp <= videoContinuationMs) {
+        lastEvent.videos.push(vid);
+        lastEvent.lastVideoTimestamp = vid.timestamp;
+        lastEvent.end = vid.timestamp;
+      } else {
+        events.push({
+          start: vid.timestamp,
+          end: vid.timestamp,
+          lastVideoTimestamp: vid.timestamp,
+          videos: [vid],
+          snapshots: [],
+        });
+      }
+    });
+
+    const unassignedSnapshots = [];
+
+    snapshotItems.forEach((snap) => {
+      let matchedEvent = null;
+
+      for (const event of events) {
+        const isNearVideo = event.videos.some(
+          (vid) => Math.abs(snap.timestamp - vid.timestamp) <= eventIntervalMs
+        );
+
+        if (isNearVideo) {
+          matchedEvent = event;
+          break;
+        }
+      }
+
+      if (matchedEvent) {
+        matchedEvent.snapshots.push(snap);
+      } else {
+        unassignedSnapshots.push(snap);
+      }
+    });
+
+    unassignedSnapshots.forEach((snap) => {
+      const lastEvent = events[events.length - 1];
+      const isSnapshotOnlyEvent = lastEvent && lastEvent.videos.length === 0;
+
+      if (isSnapshotOnlyEvent && snap.timestamp - lastEvent.end <= eventIntervalMs) {
+        lastEvent.snapshots.push(snap);
+        lastEvent.end = snap.timestamp;
+      } else {
+        events.push({
+          start: snap.timestamp,
+          end: snap.timestamp,
+          lastVideoTimestamp: 0,
+          videos: [],
+          snapshots: [snap],
+        });
+      }
+    });
+
+    events.sort((a, b) => b.start - a.start);
+
+    const flatResources = [];
+    events.forEach((event) => {
+      event.snapshots.sort((a, b) => a.timestamp - b.timestamp);
+      event.videos.sort((a, b) => a.timestamp - b.timestamp);
+
+      const sampleItem = event.snapshots[0] || event.videos[0];
+      const entityName = sampleItem ? sampleItem.entityName : '';
+
+      const startDate = dayjs(event.start);
+      const formattedDate = startDate.format(this.config.caption_format || 'DD-MM-YYYY HH:mm:ss');
+
+      const fullCaption = entityName ? `${entityName} - ${formattedDate}` : formattedDate;
+
+      if (event.snapshots.length > 0) {
+        event.snapshots.forEach((snap) => {
+          flatResources.push({
+            url: snap.url,
+            name: snap.name,
+            extension: snap.extension,
+            caption: fullCaption,
+            timestamp: snap.timestamp,
+            snapshots: event.snapshots,
+            videos: event.videos,
+          });
+        });
+      } else if (event.videos.length > 0) {
+        const firstVideo = event.videos[0];
+        flatResources.push({
+          url: firstVideo.url,
+          name: firstVideo.name,
+          extension: firstVideo.extension,
+          caption: fullCaption,
+          timestamp: event.start,
+          snapshots: [],
+          videos: event.videos,
+        });
+      }
+    });
+
+    return flatResources;
+  }
+
+  _loadMediaResource(hass, entity) {
     return new Promise((resolve) => {
-      this._loadMedia(hass, contentId)
+      this._loadMedia(hass, entity.path)
         .then((values) => {
-          const resources = values.map((item) => this._createFileResource(item.authenticated_path)).filter(Boolean);
+          const resources = values
+            .map((item) => {
+              const res = this._createFileResource(item.authenticated_path);
+              if (res) {
+                res.entityPath = entity.path;
+                res.entityName = entity.name;
+              }
+              return res;
+            })
+            .filter(Boolean);
           resolve(resources);
         })
         .catch(() => resolve([]));
@@ -499,19 +687,11 @@ class GalleryCard extends LitElement {
     const fileName = decodeURIComponent(fileUrl.split('/').at(-1));
     const extension = fileName.split('.').at(-1).toLowerCase();
 
-    let caption = fileName;
-    if (this.config.file_name_format && this.config.caption_format) {
-      const parsedDate = dayjs(fileName, this.config.file_name_format);
-      if (parsedDate.isValid()) {
-        caption = parsedDate.format(this.config.caption_format);
-      }
-    }
-
     return {
       url: fileRawUrl,
       name: fileName,
       extension,
-      caption,
+      caption: fileName,
     };
   }
 
@@ -544,14 +724,14 @@ class GalleryCard extends LitElement {
         width: 100%;
         min-height: 250px;
       }
-      img {
+      img,
+      .thumb-video-frame {
         width: 100%;
         max-height: 65vh;
         object-fit: contain;
         display: block;
       }
 
-      /* Caption Bar */
       .caption-bar {
         padding: 8px 12px;
         background: rgba(0, 0, 0, 0.03);
@@ -559,12 +739,10 @@ class GalleryCard extends LitElement {
       }
       .caption-text {
         font-size: 14px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        font-weight: 500;
+        line-height: 1.3;
       }
 
-      /* Navigatie Knopen */
       .btn {
         position: absolute;
         top: 50%;
@@ -585,7 +763,6 @@ class GalleryCard extends LitElement {
         right: 10px;
       }
 
-      /* Dashboard controls (onder de foto) */
       .card-controls {
         display: flex;
         justify-content: center;
@@ -609,7 +786,36 @@ class GalleryCard extends LitElement {
         background: #e53935;
       }
 
-      /* Video / Snapshot Modal Overlay */
+      .main-dropdown-container {
+        position: relative;
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        background: var(--card-background-color, rgba(0, 0, 0, 0.05));
+      }
+
+      .entity-dropdown,
+      .date-picker-input {
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 18px;
+        padding: 5px 10px;
+        font-size: 13px;
+        cursor: pointer;
+        outline: none;
+        backdrop-filter: blur(4px);
+        color-scheme: dark;
+        font-family: inherit;
+      }
+      .entity-dropdown option {
+        background: #222;
+        color: #fff;
+      }
+
       .modal {
         display: flex;
         align-items: center;
@@ -627,77 +833,37 @@ class GalleryCard extends LitElement {
         width: 90%;
         max-width: 950px;
         background: #000;
-        padding: 10px;
+        padding: 12px;
         border-radius: 8px;
         display: flex;
         flex-direction: column;
         align-items: center;
+        box-sizing: border-box;
       }
 
-      .modal-media-wrapper {
+      /* Bovenbalk in de modal (Entity + Datum + Hamburger + Sluitknop) */
+      .modal-top-bar {
         position: relative;
         width: 100%;
         display: flex;
-        flex-direction: column;
         align-items: center;
-        justify-content: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+        z-index: 10;
       }
-      .modal-img {
-        width: 100%;
-        max-height: 75vh;
-        object-fit: contain;
-      }
-      .video-modal-container video {
-        width: 100%;
-        max-height: 75vh;
-        border-radius: 4px;
-      }
-
-      .btn-play-video {
-        background: rgba(0, 0, 0, 0.75);
-        color: #fff;
-        border: 1px solid rgba(255, 255, 255, 0.4);
-        padding: 8px 18px;
-        border-radius: 20px;
-        cursor: pointer;
+      .dropdown-group,
+      .action-group {
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 14px;
-        backdrop-filter: blur(4px);
-        transition: background 0.2s ease;
-      }
-      .btn-play-video:hover {
-        background: var(--primary-color, #03a9f4);
-        border-color: var(--primary-color, #03a9f4);
-      }
-      .btn-play-video.active {
-        background: var(--primary-color, #03a9f4);
-        border-color: var(--primary-color, #03a9f4);
+        position: relative;
       }
 
-      /* Control bar ONDER de media in de modal */
-      .video-selector-bar {
-        display: flex;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 12px;
-        width: 100%;
-      }
-
-      /* Hamburger menu rechtsbovenin de modal */
-      .hamburger-container {
-        position: absolute;
-        top: 15px;
-        right: 15px;
-        z-index: 10000;
-        display: flex;
-        gap: 8px;
-      }
       .btn-hamburger,
       .btn-close-x {
-        background: rgba(0, 0, 0, 0.6);
+        background: rgba(255, 255, 255, 0.1);
         color: #fff;
         border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 50%;
@@ -710,21 +876,22 @@ class GalleryCard extends LitElement {
       }
       .btn-hamburger:hover,
       .btn-close-x:hover {
-        background: rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.25);
       }
 
       .hamburger-menu {
         position: absolute;
-        top: 45px;
-        right: 0;
+        top: 42px;
+        right: 42px;
         background: var(--card-background-color, #222);
         border: 1px solid var(--divider-color, #444);
         border-radius: 6px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-        min-width: 200px;
+        min-width: 220px;
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        z-index: 100;
       }
       .menu-item {
         display: flex;
@@ -743,9 +910,76 @@ class GalleryCard extends LitElement {
         --mdc-icon-size: 20px;
         color: var(--primary-text-color, #fff);
       }
+
+      .modal-header-info {
+        width: 100%;
+        text-align: center;
+        padding: 8px 0 4px 0;
+        color: #fff;
+      }
+      .event-time-title {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        line-height: 1.3;
+      }
+
+      .modal-media-wrapper {
+        position: relative;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal-img {
+        width: 100%;
+        max-height: 65vh;
+        object-fit: contain;
+      }
+      .video-modal-container video {
+        width: 100%;
+        max-height: 65vh;
+        border-radius: 4px;
+      }
+
+      .btn-play-video {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        padding: 8px 16px;
+        border-radius: 20px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        backdrop-filter: blur(4px);
+        transition: all 0.2s ease;
+      }
+      .btn-play-video:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      
+      .btn-play-video.active {
+        background: var(--primary-color, #03a9f4) !important;
+        border-color: var(--primary-color, #03a9f4) !important;
+        font-weight: bold;
+        box-shadow: 0 0 8px rgba(3, 169, 244, 0.5);
+      }
+
+      .video-selector-bar {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 12px;
+        width: 100%;
+      }
     `;
   }
 }
+
 customElements.define('reolink-gallery-card', GalleryCard);
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
