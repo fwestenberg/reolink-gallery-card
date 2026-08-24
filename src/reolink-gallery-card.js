@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.3.3';
+const ReolinkGalleryCardVersion = '1.3.4';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -106,8 +106,7 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Video',
         timelapse: 'Timelapse',
-        download_snapshot: 'Download snapshot',
-        download_video: 'Download video',
+        downloads: 'Downloads:',
         all: 'Alles',
       },
       en: {
@@ -126,8 +125,7 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Video',
         timelapse: 'Timelapse',
-        download_snapshot: 'Download snapshot',
-        download_video: 'Download video',
+        downloads: 'Downloads:',
         all: 'All',
       },
       de: {
@@ -146,8 +144,7 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Video',
         timelapse: 'Zeitraffer',
-        download_snapshot: 'Snapshot herunterladen',
-        download_video: 'Video herunterladen',
+        downloads: 'Downloads:',
         all: 'Alle',
       },
       fr: {
@@ -166,8 +163,7 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Vidéo',
         timelapse: 'Timelapse',
-        download_snapshot: 'Télécharger snapshot',
-        download_video: 'Télécharger vidéo',
+        downloads: 'Téléchargements:',
         all: 'Tous',
       },
     };
@@ -310,6 +306,9 @@ class GalleryCard extends LitElement {
   _renderDateFilterBar(inModal = false) {
     const maxDateTime = dayjs().endOf('day').format('YYYY-MM-DDTHH:mm');
     const shouldShowPopover = this.showDatePickerModal && (inModal ? this.modalOpen : !this.modalOpen);
+    
+    const nextDayStart = dayjs(this.selectedStartDateTime).add(1, 'day');
+    const isAtFutureLimit = nextDayStart.isAfter(dayjs().endOf('day'));
 
     return html`
       <div class="ha-energy-date-bar">
@@ -336,6 +335,7 @@ class GalleryCard extends LitElement {
         <button
           class="icon-nav-btn"
           aria-label="Volgende dag"
+          ?disabled="${isAtFutureLimit}"
           @click="${() => {
             this._shiftDay(1);
           }}"
@@ -521,7 +521,7 @@ class GalleryCard extends LitElement {
                         ? html`
                             <select class="download-dropdown" title="Menu" @change="${(e) => this._handleDownloadSelect(e)}">
                               <option value="" disabled selected hidden>⋮</option>
-                              <option disabled class="dropdown-header">Download</option>
+                              <option disabled class="dropdown-header">${this._t('downloads')}</option>
                               ${currentRes.snapshots.map((img, i) => html` <option value="${img.url}">&nbsp;&nbsp;${hasMultipleSnapshots ? `Snapshot ${i + 1}` : 'Snapshot'}</option> `)} ${currentRes.videos.map((vid, i) => html` <option value="${vid.url}">&nbsp;&nbsp;${hasMultipleVideos ? `Video ${i + 1}` : 'Video'}</option> `)}
                             </select>
                           `
@@ -1402,6 +1402,12 @@ class GalleryCard extends LitElement {
       .icon-nav-btn:hover {
         background: var(--divider-color, rgba(0, 0, 0, 0.08));
       }
+      .icon-nav-btn[disabled],
+      .icon-nav-btn:disabled {
+        opacity: 0.25;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
 
       .date-picker-popover {
         position: absolute;
@@ -1615,11 +1621,6 @@ class GalleryCard extends LitElement {
         outline: none;
         font-family: inherit;
       }
-      .download-dropdown option.dropdown-header {
-        color: rgba(255, 255, 255, 0.5) !important;
-        font-weight: normal;
-        font-size: 12px;
-      }
 
       .download-dropdown option:not(.dropdown-header) {
         padding-left: 12px;
@@ -1657,7 +1658,6 @@ class GalleryCard extends LitElement {
         border-radius: 4px;
       }
 
-      /* ====== Aangepast: Modal knoppen nu blauw ====== */
       .btn-play-video {
         background: var(--primary-color, #03a9f4);
         color: #fff;
