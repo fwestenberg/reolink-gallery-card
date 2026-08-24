@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.3.1';
+const ReolinkGalleryCardVersion = '1.3.2';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -83,6 +83,7 @@ class GalleryCard extends LitElement {
       nl: {
         today: 'Vandaag',
         yesterday: 'Gisteren',
+        dayBeforeYesterday: 'Eergisteren',
         last24h: 'Afgelopen 24 uur',
         last7days: 'Afgelopen 7 dagen',
         lastMonth: 'Afgelopen maand',
@@ -102,6 +103,7 @@ class GalleryCard extends LitElement {
       en: {
         today: 'Today',
         yesterday: 'Yesterday',
+        dayBeforeYesterday: 'Day before yesterday',
         last24h: 'Last 24 hours',
         last7days: 'Last 7 days',
         lastMonth: 'Last month',
@@ -121,6 +123,7 @@ class GalleryCard extends LitElement {
       de: {
         today: 'Heute',
         yesterday: 'Gestern',
+        dayBeforeYesterday: 'Vorgestern',
         last24h: 'Letzte 24 Stunden',
         last7days: 'Letzte 7 Tage',
         lastMonth: 'Letzter Monat',
@@ -140,6 +143,7 @@ class GalleryCard extends LitElement {
       fr: {
         today: "Aujourd'hui",
         yesterday: 'Hier',
+        dayBeforeYesterday: 'Avant-hier',
         last24h: 'Dernières 24 heures',
         last7days: '7 derniers jours',
         lastMonth: 'Dernier mois',
@@ -207,27 +211,69 @@ class GalleryCard extends LitElement {
 
   _shiftDay(direction) {
     this.selectedPreset = null;
+    const nowEnd = dayjs().endOf('day');
     const start = dayjs(this.selectedStartDateTime).add(direction, 'day');
     const end = dayjs(this.selectedEndDateTime).add(direction, 'day');
+
+    if (direction > 0 && start.isAfter(nowEnd)) {
+      return;
+    }
+
+    const clampedEnd = end.isAfter(nowEnd) ? nowEnd : end;
+
     this.selectedStartDateTime = start.format('YYYY-MM-DDTHH:mm');
-    this.selectedEndDateTime = end.format('YYYY-MM-DDTHH:mm');
+    this.selectedEndDateTime = clampedEnd.format('YYYY-MM-DDTHH:mm');
     if (this._hass) {
       this._loadResources(this._hass);
     }
   }
 
   _formatLabelDate() {
-    if (this.selectedPreset) {
-      return this._t(this.selectedPreset);
-    }
-
     const s = dayjs(this.selectedStartDateTime);
     const e = dayjs(this.selectedEndDateTime);
     if (!s.isValid() || !e.isValid()) return this._t('select_date');
 
+    const now = dayjs();
+    const todayStart = now.startOf('day');
+    const todayEnd = now.endOf('day');
+    const yesterdayStart = now.subtract(1, 'day').startOf('day');
+    const yesterdayEnd = now.subtract(1, 'day').endOf('day');
+    const eergisterenStart = now.subtract(2, 'day').startOf('day');
+    const eergisterenEnd = now.subtract(2, 'day').endOf('day');
+    const last7daysStart = now.subtract(7, 'day').startOf('day');
+    const lastMonthStart = now.subtract(1, 'month').startOf('day');
+
+    const isSameRange = (startRef, endRef) =>
+      Math.abs(s.diff(startRef, 'minute')) <= 1 && Math.abs(e.diff(endRef, 'minute')) <= 1;
+
+    if (isSameRange(todayStart, todayEnd)) return this._t('today');
+    if (isSameRange(yesterdayStart, yesterdayEnd)) return this._t('yesterday');
+    if (isSameRange(eergisterenStart, eergisterenEnd)) return this._t('dayBeforeYesterday');
+    if (isSameRange(last7daysStart, todayEnd)) return this._t('last7days');
+    if (isSameRange(lastMonthStart, todayEnd)) return this._t('lastMonth');
+
+    const isFullDayRange = s.format('HH:mm') === '00:00' && e.format('HH:mm') === '23:59';
+
     if (s.isSame(e, 'day')) {
+      let dayPrefix = '';
+      if (s.isSame(todayStart, 'day')) dayPrefix = this._t('today');
+      else if (s.isSame(yesterdayStart, 'day')) dayPrefix = this._t('yesterday');
+      else if (s.isSame(eergisterenStart, 'day')) dayPrefix = this._t('dayBeforeYesterday');
+
+      if (isFullDayRange) {
+        return dayPrefix || s.format('D MMM');
+      }
+
+      if (dayPrefix) {
+        return `${dayPrefix} ${s.format('HH:mm')} - ${e.format('HH:mm')}`;
+      }
       return `${s.format('D MMM HH:mm')} - ${e.format('HH:mm')}`;
     }
+
+    if (isFullDayRange) {
+      return `${s.format('D MMM')} - ${e.format('D MMM')}`;
+    }
+
     return `${s.format('D MMM HH:mm')} - ${e.format('D MMM HH:mm')}`;
   }
 
@@ -243,6 +289,8 @@ class GalleryCard extends LitElement {
   }
 
   _renderDateFilterBar() {
+    const maxDateTime = dayjs().endOf('day').format('YYYY-MM-DDTHH:mm');
+
     return html`
       <div class="ha-energy-date-bar">
         <button
@@ -317,10 +365,16 @@ class GalleryCard extends LitElement {
                     <label>${this._t('from')}</label>
                     <input
                       type="datetime-local"
+                      max="${maxDateTime}"
                       .value="${this.selectedStartDateTime || ''}"
                       @change="${(e) => {
                         this.selectedPreset = null;
-                        this.selectedStartDateTime = e.target.value;
+                        let val = e.target.value;
+                        if (dayjs(val).isAfter(dayjs().endOf('day'))) {
+                          val = maxDateTime;
+                          e.target.value = val;
+                        }
+                        this.selectedStartDateTime = val;
                         if (this._hass) this._loadResources(this._hass);
                       }}"
                     />
@@ -329,10 +383,16 @@ class GalleryCard extends LitElement {
                     <label>${this._t('to')}</label>
                     <input
                       type="datetime-local"
+                      max="${maxDateTime}"
                       .value="${this.selectedEndDateTime || ''}"
                       @change="${(e) => {
                         this.selectedPreset = null;
-                        this.selectedEndDateTime = e.target.value;
+                        let val = e.target.value;
+                        if (dayjs(val).isAfter(dayjs().endOf('day'))) {
+                          val = maxDateTime;
+                          e.target.value = val;
+                        }
+                        this.selectedEndDateTime = val;
                         if (this._hass) this._loadResources(this._hass);
                       }}"
                     />
@@ -1275,13 +1335,15 @@ class GalleryCard extends LitElement {
 
       .ha-energy-date-bar {
         position: relative;
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 6px;
         background: var(--secondary-background-color, #f1f1f1);
         border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
         border-radius: 20px;
-        padding: 2px 6px;
+        padding: 0 6px;
+        height: 32px;
+        box-sizing: border-box;
       }
       .date-display-btn {
         background: transparent;
@@ -1393,11 +1455,15 @@ class GalleryCard extends LitElement {
         color: var(--primary-text-color, #212121);
         border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.2));
         border-radius: 18px;
-        padding: 5px 8px;
+        padding: 0 10px;
+        height: 32px;
+        box-sizing: border-box;
         font-size: 12px;
         cursor: pointer;
         outline: none;
         font-family: inherit;
+        display: inline-flex;
+        align-items: center;
       }
       .entity-dropdown option {
         background: var(--ha-card-background, var(--card-background-color, #ffffff));
@@ -1455,6 +1521,15 @@ class GalleryCard extends LitElement {
         align-items: center;
         gap: 6px;
         position: relative;
+      }
+
+      @media (max-width: 768px) {
+        .modal-top-bar {
+          justify-content: flex-end;
+        }
+        .modal-top-bar .dropdown-group {
+          display: none;
+        }
       }
 
       .btn-hamburger,
