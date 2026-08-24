@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
-const ReolinkGalleryCardVersion = '1.3.4';
+const ReolinkGalleryCardVersion = '1.3.5';
 
 console.groupCollapsed(`%cREOLINK-GALLERY-CARD ${ReolinkGalleryCardVersion} IS INSTALLED`, 'color: green; font-weight: bold');
 console.log('Readme:', 'https://github.com/fwestenberg/reolink-gallery-card');
@@ -32,6 +32,9 @@ class GalleryCard extends LitElement {
       selectedStartDateTime: {},
       selectedEndDateTime: {},
       showDatePickerModal: {},
+      showDownloadMenu: {},
+      showEntityMenu: {},
+      showMediaMenu: {},
       selectedPreset: {},
       _loading: {},
     };
@@ -47,6 +50,9 @@ class GalleryCard extends LitElement {
     this.timelapseTimer = null;
     this.selectedEntityFilter = null;
     this.showDatePickerModal = false;
+    this.showDownloadMenu = false;
+    this.showEntityMenu = false;
+    this.showMediaMenu = false;
     this.selectedPreset = 'today';
     this._loading = false;
 
@@ -85,6 +91,21 @@ class GalleryCard extends LitElement {
     if (!isDatePicker && this.showDatePickerModal) {
       this.showDatePickerModal = false;
     }
+
+    const isDownloadMenu = path.some((el) => el.classList && (el.classList.contains('download-container') || el.classList.contains('download-menu-popover')));
+    if (!isDownloadMenu && this.showDownloadMenu) {
+      this.showDownloadMenu = false;
+    }
+
+    const isEntityMenu = path.some((el) => el.classList && (el.classList.contains('entity-menu-container') || el.classList.contains('custom-dropdown-popover')));
+    if (!isEntityMenu && this.showEntityMenu) {
+      this.showEntityMenu = false;
+    }
+
+    const isMediaMenu = path.some((el) => el.classList && (el.classList.contains('media-menu-container') || el.classList.contains('custom-dropdown-popover')));
+    if (!isMediaMenu && this.showMediaMenu) {
+      this.showMediaMenu = false;
+    }
   }
 
   _t(key) {
@@ -106,7 +127,9 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Video',
         timelapse: 'Timelapse',
-        downloads: 'Downloads:',
+        download: 'Downloaden',
+        download_snapshot: 'Download snapshot',
+        download_video: 'Download video',
         all: 'Alles',
       },
       en: {
@@ -125,7 +148,9 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Video',
         timelapse: 'Timelapse',
-        downloads: 'Downloads:',
+        download: 'Download',
+        download_snapshot: 'Download snapshot',
+        download_video: 'Download video',
         all: 'All',
       },
       de: {
@@ -144,7 +169,9 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Video',
         timelapse: 'Zeitraffer',
-        downloads: 'Downloads:',
+        download: 'Herunterladen',
+        download_snapshot: 'Snapshot herunterladen',
+        download_video: 'Video herunterladen',
         all: 'Alle',
       },
       fr: {
@@ -163,7 +190,9 @@ class GalleryCard extends LitElement {
         snapshot: 'Snapshot',
         video: 'Vidéo',
         timelapse: 'Timelapse',
-        downloads: 'Téléchargements:',
+        download: 'Télécharger',
+        download_snapshot: 'Télécharger snapshot',
+        download_video: 'Télécharger vidéo',
         all: 'Tous',
       },
     };
@@ -187,22 +216,20 @@ class GalleryCard extends LitElement {
     }
   }
 
-  _handleEntityFilterChange(event) {
-    this.selectedEntityFilter = event.target.value;
+  _handleEntityFilterChange(path) {
+    this.selectedEntityFilter = path;
+    this.showEntityMenu = false;
     this._updateFilteredResources();
   }
 
-  _handleDownloadSelect(event) {
-    const url = event.target.value;
+  _triggerDownload(url) {
     if (!url) return;
-
     const a = document.createElement('a');
     a.href = url;
     a.download = '';
     a.target = '_blank';
     a.click();
-
-    event.target.value = '';
+    this.showDownloadMenu = false;
   }
 
   _setPresetRange(type) {
@@ -295,11 +322,44 @@ class GalleryCard extends LitElement {
   _renderEntityDropdown() {
     if (!this.entityConfigs || this.entityConfigs.length <= 1) return html``;
 
+    const currentEntity = this.entityConfigs.find((e) => e.path === this.selectedEntityFilter);
+    const currentEntityName = currentEntity ? currentEntity.name : (this.selectedEntityFilter === 'all' ? this._t('all') : '');
+
     return html`
-      <select class="entity-dropdown" .value="${this.selectedEntityFilter}" @change="${(e) => this._handleEntityFilterChange(e)}">
-        ${this.entityConfigs.map((entity) => html` <option value="${entity.path}" ?selected="${this.selectedEntityFilter === entity.path}">${entity.name}</option> `)}
-        <option value="all" ?selected="${this.selectedEntityFilter === 'all'}">${this._t('all')}</option>
-      </select>
+      <div class="entity-menu-container">
+        <button
+          class="btn-custom-dropdown"
+          @click="${() => {
+            this.showEntityMenu = !this.showEntityMenu;
+            this.showMediaMenu = false;
+            this.showDownloadMenu = false;
+          }}"
+        >
+          <span>${currentEntityName}</span>
+          <ha-icon icon="mdi:chevron-down"></ha-icon>
+        </button>
+
+        ${this.showEntityMenu
+          ? html`
+              <div class="custom-dropdown-popover">
+                ${this.entityConfigs.map((entity) => html`
+                  <button
+                    class="custom-dropdown-item ${this.selectedEntityFilter === entity.path ? 'selected' : ''}"
+                    @click="${() => this._handleEntityFilterChange(entity.path)}"
+                  >
+                    <span>${entity.name}</span>
+                  </button>
+                `)}
+                <button
+                  class="custom-dropdown-item ${this.selectedEntityFilter === 'all' ? 'selected' : ''}"
+                  @click="${() => this._handleEntityFilterChange('all')}"
+                >
+                  <span>${this._t('all')}</span>
+                </button>
+              </div>
+            `
+          : html``}
+      </div>
     `;
   }
 
@@ -519,11 +579,39 @@ class GalleryCard extends LitElement {
                     <div class="action-group">
                       ${hasSnapshots || hasVideos
                         ? html`
-                            <select class="download-dropdown" title="Menu" @change="${(e) => this._handleDownloadSelect(e)}">
-                              <option value="" disabled selected hidden>⋮</option>
-                              <option disabled class="dropdown-header">${this._t('downloads')}</option>
-                              ${currentRes.snapshots.map((img, i) => html` <option value="${img.url}">&nbsp;&nbsp;${hasMultipleSnapshots ? `Snapshot ${i + 1}` : 'Snapshot'}</option> `)} ${currentRes.videos.map((vid, i) => html` <option value="${vid.url}">&nbsp;&nbsp;${hasMultipleVideos ? `Video ${i + 1}` : 'Video'}</option> `)}
-                            </select>
+                            <div class="download-container">
+                              <button
+                                class="btn-download-menu"
+                                title="${this._t('download')}"
+                                @click="${() => {
+                                  this.showDownloadMenu = !this.showDownloadMenu;
+                                  this.showEntityMenu = false;
+                                  this.showMediaMenu = false;
+                                }}"
+                              >
+                                <ha-icon icon="mdi:dots-vertical"></ha-icon>
+                              </button>
+
+                              ${this.showDownloadMenu
+                                ? html`
+                                    <div class="download-menu-popover">
+                                      <div class="download-menu-header">${this._t('download')}</div>
+                                      ${currentRes.snapshots.map((img, i) => html`
+                                        <button class="download-menu-item" @click="${() => this._triggerDownload(img.url)}">
+                                          <ha-icon icon="mdi:camera"></ha-icon>
+                                          <span>${hasMultipleSnapshots ? `${this._t('snapshot')} ${i + 1}` : this._t('snapshot')}</span>
+                                        </button>
+                                      `)}
+                                      ${currentRes.videos.map((vid, i) => html`
+                                        <button class="download-menu-item" @click="${() => this._triggerDownload(vid.url)}">
+                                          <ha-icon icon="mdi:video"></ha-icon>
+                                          <span>${hasMultipleVideos ? `${this._t('video')} ${i + 1}` : this._t('video')}</span>
+                                        </button>
+                                      `)}
+                                    </div>
+                                  `
+                                : html``}
+                            </div>
                           `
                         : html``}
 
@@ -577,20 +665,61 @@ class GalleryCard extends LitElement {
                           ${!this.isPlayingTimelapse && (hasSnapshots || hasVideos)
                             ? (() => {
                                 let selectedMediaValue = '';
+                                let selectedMediaLabel = this._t('snapshot');
                                 if (this.selectedVideoUrl || this.selectedVideoMediaContentId) {
                                   const vidIdx = currentRes.videos ? currentRes.videos.findIndex((vid) => (vid.url && vid.url === this.selectedVideoUrl) || (this.selectedVideoMediaContentId && vid.media_content_id === this.selectedVideoMediaContentId)) : -1;
-                                  if (vidIdx !== -1) selectedMediaValue = `vid-${vidIdx}`;
+                                  if (vidIdx !== -1) {
+                                    selectedMediaValue = `vid-${vidIdx}`;
+                                    selectedMediaLabel = hasMultipleVideos ? `${this._t('video')} ${vidIdx + 1}` : this._t('video');
+                                  }
                                 }
 
                                 if (!selectedMediaValue && currentRes.snapshots && currentRes.snapshots.length > 0) {
                                   const snapIdx = currentRes.snapshots.findIndex((img) => img === activeSnapshot || (img.url && img.url === activeSnapshotUrl) || (img.media_content_id && activeSnapshot && img.media_content_id === activeSnapshot.media_content_id));
-                                  selectedMediaValue = snapIdx !== -1 ? `snap-${snapIdx}` : 'snap-0';
+                                  const idx = snapIdx !== -1 ? snapIdx : 0;
+                                  selectedMediaValue = `snap-${idx}`;
+                                  selectedMediaLabel = hasMultipleSnapshots ? `${this._t('snapshot')} ${idx + 1}` : this._t('snapshot');
                                 }
 
                                 return html`
-                                  <select class="media-dropdown" .value="${selectedMediaValue}" @change="${(e) => this._handleMediaDropdownChange(e, currentRes)}">
-                                    ${hasSnapshots ? currentRes.snapshots.map((_, i) => html` <option value="snap-${i}" ?selected="${selectedMediaValue === `snap-${i}`}">${hasMultipleSnapshots ? `${this._t('snapshot')} ${i + 1}` : this._t('snapshot')}</option> `) : html``} ${hasVideos ? currentRes.videos.map((_, i) => html` <option value="vid-${i}" ?selected="${selectedMediaValue === `vid-${i}`}">${hasMultipleVideos ? `${this._t('video')} ${i + 1}` : this._t('video')}</option> `) : html``}
-                                  </select>
+                                  <div class="media-menu-container">
+                                    <button
+                                      class="btn-media-selector"
+                                      @click="${() => {
+                                        this.showMediaMenu = !this.showMediaMenu;
+                                        this.showEntityMenu = false;
+                                        this.showDownloadMenu = false;
+                                      }}"
+                                    >
+                                      <span>${selectedMediaLabel}</span>
+                                      <ha-icon icon="mdi:chevron-down"></ha-icon>
+                                    </button>
+
+                                    ${this.showMediaMenu
+                                      ? html`
+                                          <div class="custom-dropdown-popover">
+                                            ${hasSnapshots ? currentRes.snapshots.map((_, i) => html`
+                                              <button
+                                                class="custom-dropdown-item ${selectedMediaValue === `snap-${i}` ? 'selected' : ''}"
+                                                @click="${() => this._handleMediaSelection(`snap-${i}`, currentRes)}"
+                                              >
+                                                <ha-icon icon="mdi:camera"></ha-icon>
+                                                <span>${hasMultipleSnapshots ? `${this._t('snapshot')} ${i + 1}` : this._t('snapshot')}</span>
+                                              </button>
+                                            `) : html``}
+                                            ${hasVideos ? currentRes.videos.map((_, i) => html`
+                                              <button
+                                                class="custom-dropdown-item ${selectedMediaValue === `vid-${i}` ? 'selected' : ''}"
+                                                @click="${() => this._handleMediaSelection(`vid-${i}`, currentRes)}"
+                                              >
+                                                <ha-icon icon="mdi:video"></ha-icon>
+                                                <span>${hasMultipleVideos ? `${this._t('video')} ${i + 1}` : this._t('video')}</span>
+                                              </button>
+                                            `) : html``}
+                                          </div>
+                                        `
+                                      : html``}
+                                  </div>
                                 `;
                               })()
                             : html``}
@@ -610,8 +739,8 @@ class GalleryCard extends LitElement {
     `;
   }
 
-  async _handleMediaDropdownChange(event, currentRes) {
-    const val = event.target.value;
+  async _handleMediaSelection(val, currentRes) {
+    this.showMediaMenu = false;
     if (!val) return;
 
     const [type, indexStr] = val.split('-');
@@ -697,6 +826,9 @@ class GalleryCard extends LitElement {
     this.selectedVideoUrl = null;
     this.selectedVideoMediaContentId = null;
     this.selectedSnapshotUrl = null;
+    this.showDownloadMenu = false;
+    this.showEntityMenu = false;
+    this.showMediaMenu = false;
   }
 
   setConfig(config) {
@@ -1318,25 +1450,46 @@ class GalleryCard extends LitElement {
         padding: 8px;
         background: rgba(0, 0, 0, 0.02);
       }
-      .btn-timelapse {
+      .btn-timelapse,
+      .btn-play-video,
+      .btn-media-selector {
         background: var(--primary-color, #03a9f4);
         color: #fff;
         border: none;
-        padding: 6px 14px;
-        border-radius: 16px;
+        height: 36px;
+        padding: 0 16px;
+        border-radius: 18px;
         cursor: pointer;
-        display: flex;
+        display: inline-flex;
         align-items: center;
+        justify-content: center;
         gap: 6px;
         font-size: 13px;
-        transition: background 0.2s ease;
+        font-weight: 500;
+        box-sizing: border-box;
+        outline: none;
+        font-family: inherit;
+        transition: background 0.2s ease, filter 0.2s ease, box-shadow 0.2s ease;
+      }
+      .btn-timelapse ha-icon,
+      .btn-play-video ha-icon,
+      .btn-media-selector ha-icon {
+        --mdc-icon-size: 18px;
+      }
+      .btn-timelapse:hover,
+      .btn-play-video:hover,
+      .btn-media-selector:hover {
+        filter: brightness(0.92);
       }
       .btn-timelapse[disabled] {
         opacity: 0.5;
         cursor: not-allowed;
+        pointer-events: none;
       }
-      .btn-timelapse.active {
+      .btn-timelapse.active,
+      .btn-play-video.active {
         background: #e53935;
+        box-shadow: 0 0 8px rgba(229, 57, 53, 0.5);
       }
 
       .main-dropdown-container {
@@ -1480,31 +1633,83 @@ class GalleryCard extends LitElement {
         cursor: pointer;
       }
 
-      .entity-dropdown {
+      /* Custom Dropdown / Popover Menus (Home Assistant style) */
+      .entity-menu-container,
+      .media-menu-container {
+        position: relative;
+      }
+
+      .btn-custom-dropdown {
         background-color: var(--secondary-background-color, #f1f1f1);
         color: var(--primary-text-color, #212121);
         border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
-        border-radius: 20px;
-        padding: 0 28px 0 12px;
+        border-radius: 18px;
+        padding: 0 12px 0 16px;
         height: 32px;
         box-sizing: border-box;
         font-size: 13px;
         font-weight: 500;
         cursor: pointer;
-        outline: none;
-        font-family: inherit;
         display: inline-flex;
         align-items: center;
-        appearance: none;
-        -webkit-appearance: none;
-        -moz-appearance: none;
-        background-image: url("data:image/svg+xml;utf8,<svg fill='gray' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
-        background-repeat: no-repeat;
-        background-position: right 8px center;
+        gap: 6px;
+        outline: none;
+        font-family: inherit;
+        transition: background 0.2s ease;
       }
-      .entity-dropdown option {
+      .btn-custom-dropdown:hover {
+        background: var(--divider-color, rgba(0, 0, 0, 0.08));
+      }
+      .btn-custom-dropdown ha-icon {
+        --mdc-icon-size: 18px;
+        color: var(--secondary-text-color, #727272);
+      }
+
+      .custom-dropdown-popover {
+        position: absolute;
+        top: 38px;
+        left: 0;
         background: var(--ha-card-background, var(--card-background-color, #ffffff));
         color: var(--primary-text-color, #212121);
+        border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+        border-radius: 12px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+        padding: 6px;
+        z-index: 200;
+        display: flex;
+        flex-direction: column;
+        min-width: 160px;
+      }
+      .media-menu-container .custom-dropdown-popover {
+        top: 42px;
+      }
+
+      .custom-dropdown-item {
+        background: transparent;
+        border: none;
+        color: var(--primary-text-color, #212121);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        text-align: left;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .custom-dropdown-item:hover {
+        background: var(--divider-color, rgba(0, 0, 0, 0.08));
+      }
+      .custom-dropdown-item.selected {
+        font-weight: bold;
+        color: var(--primary-color, #03a9f4);
+      }
+      .custom-dropdown-item ha-icon {
+        --mdc-icon-size: 16px;
+        color: var(--secondary-text-color, #727272);
       }
 
       .modal {
@@ -1539,22 +1744,34 @@ class GalleryCard extends LitElement {
         border: 1px solid rgba(255, 255, 255, 0.2);
       }
       .video-modal-container .ha-energy-date-bar,
-      .video-modal-container .entity-dropdown {
+      .video-modal-container .btn-custom-dropdown {
         background-color: rgba(255, 255, 255, 0.12);
         border: 1px solid rgba(255, 255, 255, 0.25);
         color: #ffffff;
       }
       .video-modal-container .date-display-btn,
       .video-modal-container .icon-nav-btn,
-      .video-modal-container .date-display-btn ha-icon {
+      .video-modal-container .date-display-btn ha-icon,
+      .video-modal-container .btn-custom-dropdown ha-icon {
         color: #ffffff;
       }
-      .video-modal-container .entity-dropdown {
-        background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
+      .video-modal-container .btn-custom-dropdown:hover {
+        background: rgba(255, 255, 255, 0.25);
       }
-      .video-modal-container select option {
-        background-color: #2b2b2b !important;
-        color: #ffffff !important;
+      .video-modal-container .custom-dropdown-popover {
+        background: #2b2b2b;
+        color: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+      }
+      .video-modal-container .custom-dropdown-item {
+        color: #ffffff;
+      }
+      .video-modal-container .custom-dropdown-item:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .video-modal-container .custom-dropdown-item.selected {
+        color: var(--primary-color, #03a9f4);
       }
 
       .modal-top-bar {
@@ -1601,8 +1818,12 @@ class GalleryCard extends LitElement {
         background: rgba(255, 255, 255, 0.25);
       }
 
-      .download-dropdown {
-        background-color: rgba(255, 255, 255, 0.12);
+      .download-container {
+        position: relative;
+      }
+
+      .btn-download-menu {
+        background: rgba(255, 255, 255, 0.12);
         color: #ffffff;
         border: 1px solid rgba(255, 255, 255, 0.25);
         border-radius: 50%;
@@ -1611,19 +1832,67 @@ class GalleryCard extends LitElement {
         padding: 0;
         box-sizing: border-box;
         cursor: pointer;
-        font-size: 16px;
-        font-weight: bold;
-        text-align: center;
-        text-align-last: center;
-        appearance: none;
-        -webkit-appearance: none;
-        -moz-appearance: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         outline: none;
-        font-family: inherit;
+        transition: background 0.2s ease;
+      }
+      .btn-download-menu:hover {
+        background: rgba(255, 255, 255, 0.25);
+      }
+      .btn-download-menu ha-icon {
+        --mdc-icon-size: 20px;
       }
 
-      .download-dropdown option:not(.dropdown-header) {
-        padding-left: 12px;
+      .download-menu-popover {
+        position: absolute;
+        top: 42px;
+        right: 0;
+        background: #2b2b2b;
+        color: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        padding: 6px;
+        z-index: 200;
+        display: flex;
+        flex-direction: column;
+        min-width: 160px;
+      }
+
+      .download-menu-header {
+        font-size: 11px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.6);
+        padding: 6px 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 4px;
+      }
+
+      .download-menu-item {
+        background: transparent;
+        border: none;
+        color: #ffffff;
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        text-align: left;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .download-menu-item:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .download-menu-item ha-icon {
+        --mdc-icon-size: 16px;
+        color: rgba(255, 255, 255, 0.8);
       }
 
       .modal-header-info {
@@ -1631,12 +1900,6 @@ class GalleryCard extends LitElement {
         display: flex;
         justify-content: center;
         padding: 10px 0 4px 0;
-      }
-      .event-time-title {
-        font-size: 15px;
-        font-weight: 600;
-        letter-spacing: 0.5px;
-        line-height: 1.3;
       }
 
       .modal-media-wrapper {
@@ -1656,61 +1919,6 @@ class GalleryCard extends LitElement {
         width: 100%;
         max-height: 65vh;
         border-radius: 4px;
-      }
-
-      .btn-play-video {
-        background: var(--primary-color, #03a9f4);
-        color: #fff;
-        border: 1px solid var(--primary-color, #03a9f4);
-        height: 36px;
-        padding: 0 16px;
-        border-radius: 20px;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        font-size: 13px;
-        font-weight: 500;
-        box-sizing: border-box;
-        transition: all 0.2s ease;
-      }
-      .btn-play-video:hover {
-        filter: brightness(1.1);
-      }
-
-      .btn-play-video.active {
-        background: #e53935 !important;
-        border-color: #e53935 !important;
-        font-weight: bold;
-        box-shadow: 0 0 8px rgba(229, 57, 53, 0.5);
-      }
-
-      .media-dropdown {
-        background-color: var(--primary-color, #03a9f4);
-        color: #ffffff;
-        border: 1px solid var(--primary-color, #03a9f4);
-        border-radius: 20px;
-        padding: 0 32px 0 16px;
-        height: 36px;
-        box-sizing: border-box;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 500;
-        display: inline-flex;
-        align-items: center;
-        appearance: none;
-        -webkit-appearance: none;
-        -moz-appearance: none;
-        background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
-        background-repeat: no-repeat;
-        background-position: right 8px center;
-        outline: none;
-        font-family: inherit;
-        transition: all 0.2s ease;
-      }
-      .media-dropdown:hover {
-        filter: brightness(1.1);
       }
 
       .video-selector-bar {
